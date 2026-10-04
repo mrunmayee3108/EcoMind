@@ -20,40 +20,52 @@ class LocalProvider(ModelProvider):
             if target_model == "local-small":
                 target_model = "qwen2.5:0.5b"
 
+            from telemetry.gpu import GpuEnergyMonitor
+            gpu_monitor = GpuEnergyMonitor()
+            gpu_monitor.start()
             start_time = time.perf_counter()
-            with httpx.Client(timeout=0.4) as client:
-                res = client.post(
-                    f"{self.base_url}/api/generate",
-                    json={
-                        "model": target_model,
-                        "prompt": prompt,
-                        "stream": False
-                    }
-                )
-                if res.status_code == 200:
-                    data = res.json()
-                    latency_ms = (time.perf_counter() - start_time) * 1000
-                    prompt_tokens = data.get("prompt_eval_count")
-                    eval_tokens = data.get("eval_count")
-                    total_tokens = (prompt_tokens or 0) + (eval_tokens or 0) if prompt_tokens or eval_tokens else None
-                    
-                    return ProviderResponse(
-                        content=data.get("response", ""),
-                        model_name=target_model,
-                        provider_name=self.provider_name,
-                        latency_ms=latency_ms,
-                        usage=TokenUsage(
-                            prompt_tokens=prompt_tokens,
-                            completion_tokens=eval_tokens,
-                            total_tokens=total_tokens,
-                            is_estimated=False
-                        ),
-                        raw_metadata={
-                            "backend": "ollama",
-                            "ollama_model": data.get("model", target_model),
-                            "total_duration_ns": data.get("total_duration")
+            try:
+                with httpx.Client(timeout=0.4) as client:
+                    res = client.post(
+                        f"{self.base_url}/api/generate",
+                        json={
+                            "model": target_model,
+                            "prompt": prompt,
+                            "stream": False
                         }
                     )
+            finally:
+                gpu_monitor.stop()
+
+            if res.status_code == 200:
+                data = res.json()
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                prompt_tokens = data.get("prompt_eval_count")
+                eval_tokens = data.get("eval_count")
+                total_tokens = (prompt_tokens or 0) + (eval_tokens or 0) if prompt_tokens or eval_tokens else None
+                gpu_telemetry = gpu_monitor.get_telemetry()
+                
+                raw_metadata = {
+                    "backend": "ollama",
+                    "ollama_model": data.get("model", target_model),
+                    "total_duration_ns": data.get("total_duration")
+                }
+                if gpu_telemetry.provenance.value == "MEASURED":
+                    raw_metadata["gpu_telemetry"] = gpu_telemetry.model_dump()
+
+                return ProviderResponse(
+                    content=data.get("response", ""),
+                    model_name=target_model,
+                    provider_name=self.provider_name,
+                    latency_ms=latency_ms,
+                    usage=TokenUsage(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=eval_tokens,
+                        total_tokens=total_tokens,
+                        is_estimated=False
+                    ),
+                    raw_metadata=raw_metadata
+                )
         except Exception:
             return None
         return None

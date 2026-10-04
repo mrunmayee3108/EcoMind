@@ -24,13 +24,19 @@ The system considers query complexity, model capability, estimated energy, water
 backend/
 ├── main.py                     # FastAPI application entrypoint
 ├── api/
-│   ├── routes_chat.py          # /chat, /tools, /models endpoints
+│   ├── routes_chat.py          # /chat, /tools, /models, /telemetry endpoints
 │   └── schemas.py              # Pydantic v2 request/response schemas
 ├── models/
 │   ├── provider.py             # ModelProvider base class & ProviderResponse
 │   ├── gemini_provider.py      # Google GenAI provider with authentic token usage
-│   ├── local_provider.py       # Ollama integration & offline development fallback
+│   ├── groq_provider.py        # Groq LPU provider with authentic token usage
+│   ├── local_provider.py       # Ollama integration with NVML GPU power monitoring
 │   └── model_profiles.py       # Catalog for small, medium, large tiers
+├── telemetry/
+│   ├── __init__.py             # Telemetry module exports
+│   ├── schemas.py              # TelemetryRecord, ProvenanceStatus, GpuTelemetry models
+│   ├── gpu.py                  # High-speed NVML / nvidia-smi GPU power & energy sampler
+│   └── telemetry.py            # Central thread-safe TelemetryCollector
 ├── tools/
 │   ├── base.py                 # BaseTool & ToolResult abstractions
 │   ├── calculator.py           # Safe AST-based deterministic calculator
@@ -50,6 +56,10 @@ backend/
     ├── test_tool_registry.py       # Unit tests for ToolRegistry & candidate matching
     ├── test_router.py              # Unit tests for initial query analysis & routing
     ├── test_models.py              # Unit tests for ModelProfile & providers
+    ├── test_groq_provider.py       # Unit tests for Groq provider
+    ├── test_dispatcher.py          # Unit tests for ModelDispatcher
+    ├── test_semantic_cache.py      # Unit tests for Precision-First Semantic Cache
+    ├── test_telemetry.py           # Unit tests for Phase 5A measurement infrastructure
     └── test_api.py                 # Integration tests for FastAPI endpoints
 frontend/                       # React 19 + Vite 8 + Tailwind CSS v4 dashboard
 ```
@@ -198,10 +208,61 @@ When `add_entry` is called and the cache has reached `MAX_CACHE_ENTRIES`, safe t
   semantic_cache.clear()
   ```
 
-#### 6. Current Limitations
+#### 6. Current Semantic Cache Limitations
 * **Local Single-Node Storage**: SQLite + FAISS index reside locally on disk; distributed clusters (e.g., Redis Cluster or Milvus) are not required for single-node deployments.
 * **Dynamic Query Exclusion**: Queries identified as time-sensitive, dynamic, or real-time (e.g. current Bitcoin price, live scores) are deliberately uncacheable to prevent serving stale information.
 * **Embedding Model Binding**: The vector index is tailored to 384-dimensional embeddings from `all-MiniLM-L6-v2`; switching embedding models requires index reinitialization.
-* Peer-reviewed environmental estimation (energy, water, carbon) belongs to Phase 5.
-* Multi-objective Pareto optimization across quality, latency, cost, and carbon belongs to Phase 6.
-* Itemized Eco Receipts belong to Phase 7.
+
+---
+
+## Phase 5A: Telemetry & Measurement Infrastructure
+
+Phase 5A establishes the authentic measurement foundation for EcoMind without fabricating environmental numbers or hardcoding synthetic constants.
+
+### 1. What Telemetry is Currently Collected
+For every executed request through `/chat`, the telemetry layer captures:
+* **Request Metadata**: `request_id` (UUIDv4), `timestamp` (ISO-8601 UTC), `route` (execution path label), `provider` (cloud or local provider), and `model` (model identifier).
+* **Execution Status**: `success` (boolean flag) and `error_message` (populated on failure).
+* **Token Counts**: `input_tokens`, `output_tokens`, and `total_tokens`.
+* **Latency Profile**: `inference_latency_ms` (provider API roundtrip or tool execution time) and `execution_time_ms` (total control plane processing time).
+* **Environmental Metrics**: Physical `energy_joules` (only when measured on local hardware), with `water_liters` and `carbon_gco2e`.
+
+### 2. Data Provenance & Classification
+EcoMind categorizes all telemetry into three strict provenance categories:
+
+| Provenance Status | Description | Used For |
+|---|---|---|
+| `MEASURED` | Directly measured on the host system using high-resolution timers, hardware sensors, or exact mathematical counts. | Total execution time, inference duration, deterministic tool tokens (0), semantic cache tokens (0), on-device GPU power/energy. |
+| `PROVIDER_REPORTED` | Authentic metrics returned directly by model APIs and daemon protocols. | Prompt tokens, completion tokens, and total tokens from Groq (`chat.completion.usage`), Google Gemini (`response.usage_metadata`), and Ollama (`prompt_eval_count`, `eval_count`). |
+| `UNAVAILABLE` | Physical values that cannot be authentically measured on the current system or for cloud providers. | Physical energy, water, and carbon for cloud API calls (Groq, Gemini); tokens/latencies on failed requests. |
+
+> **Zero-Fabrication Guarantee**: The system never populates physical energy, water, or carbon with synthetic guesses in Phase 5A. `ESTIMATED` status is deliberately omitted until peer-reviewed estimation models are implemented in Phase 5B.
+
+### 3. On-Device Local GPU Power & Energy Measurement
+For local model inference executed on NVIDIA hardware:
+* **Direct NVML C-Binding**: High-speed, microsecond querying via `ctypes` (`nvmlInit_v2`, `nvmlDeviceGetHandleByIndex_v2`, `nvmlDeviceGetPowerUsage`) with automatic fallback to `nvidia-smi`.
+* **Inference Window Sampling**: Background thread samples instantaneous GPU wattage during the active model generation window.
+* **Integrated Energy Calculation**:
+  $$\text{Energy (Joules)} = \text{Average Power (Watts)} \times \text{Duration (seconds)}$$
+* **Explicit Hardware Label**:
+  `"MEASURED GPU ENERGY (INFERENCE WINDOW ONLY - NOT TOTAL SYSTEM ENERGY)"`
+
+### 4. What Remains Unavailable
+* **Cloud Hardware Power**: Cloud providers (Groq, Google) do not expose physical server energy draw, data center PUE, cooling water usage, or grid emission factors in their API responses.
+* **Non-GPU System Power**: CPU, motherboard, RAM, storage, cooling fans, and PSU power conversion losses are not measured by NVML.
+* **Operational Water & Embodied Carbon**: Data center cooling water evaporation and hardware manufacturing (embodied) carbon cannot be measured at runtime.
+
+### 5. Important Limitations
+1. **GPU Energy vs. System Energy**: MEASURED GPU ENERGY measures only the NVIDIA GPU die and memory power draw during inference. It is **not** the total power consumed by the server or host machine.
+2. **Cloud API Boundary**: For Groq LPUs and Google Gemini TPUs/GPUs, physical power cannot be measured by the client. These fields are explicitly marked `UNAVAILABLE` and set to `null`.
+3. **In-Memory Buffer**: Telemetry records are stored in an in-memory thread-safe circular buffer (default: 1000 records). Persistent database storage and aggregation pipelines will follow in later phases.
+4. **Subsequent Roadmap**:
+   * **Phase 5B**: Peer-reviewed environmental accounting formulas for cloud APIs.
+   * **Phase 6**: Multi-objective Pareto routing optimizer.
+   * **Phase 7**: Comprehensive user-facing Eco Receipts.
+
+### 6. Telemetry API Endpoints
+* `GET /telemetry/recent?limit=50`: Retrieve recent execution telemetry records.
+* `GET /telemetry/summary`: Aggregated breakdown of requests, routes, providers, tokens, and hardware measurements.
+* `POST /telemetry/clear`: Clear the in-memory telemetry buffer.
+

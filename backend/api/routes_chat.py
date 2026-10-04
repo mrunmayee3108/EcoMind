@@ -15,7 +15,10 @@ from router.query_analyzer import QueryAnalyzer
 from router.routing_policy import RoutingPolicy
 from models.dispatcher import model_dispatcher, ProviderUnavailableError
 from models.model_profiles import list_all_profiles
+from models.provider import TokenUsage
 from cache.semantic_cache import semantic_cache
+from telemetry.telemetry import telemetry_collector
+from telemetry.schemas import TelemetryRecord, TelemetrySummary
 
 router = APIRouter()
 
@@ -75,6 +78,14 @@ async def chat_endpoint(request: ChatRequest):
                     if candidate_tool.name == "calculator"
                     else f"{candidate_tool.name.capitalize()} / Deterministic Tool"
                 )
+                telemetry_rec = telemetry_collector.record_success(
+                    route=route_label,
+                    provider="deterministic",
+                    model="None",
+                    execution_time_ms=total_latency,
+                    inference_latency_ms=tool_result.execution_time_ms,
+                    token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0, is_estimated=False)
+                )
                 return ChatResponse(
                     query=query,
                     answer=str(tool_result.result),
@@ -97,14 +108,27 @@ async def chat_endpoint(request: ChatRequest):
                         "tool_execution_ms": tool_result.execution_time_ms,
                         "complexity": "deterministic",
                         "reasoning": f"Deterministic {candidate_tool.name} solved without neural network inference."
-                    }
+                    },
+                    telemetry=telemetry_rec
                 )
             elif route_pref == "deterministic_tool":
+                telemetry_collector.record_failure(
+                    route="deterministic_tool",
+                    provider="deterministic",
+                    execution_time_ms=(time.perf_counter() - start_time) * 1000,
+                    error_message=str(tool_result.error)
+                )
                 raise HTTPException(
                     status_code=400,
                     detail=f"Deterministic tool execution failed: {tool_result.error}"
                 )
         elif route_pref == "deterministic_tool":
+            telemetry_collector.record_failure(
+                route="deterministic_tool",
+                provider="deterministic",
+                execution_time_ms=(time.perf_counter() - start_time) * 1000,
+                error_message="No available deterministic tool can handle this query."
+            )
             raise HTTPException(
                 status_code=400,
                 detail="No available deterministic tool can handle this query."
@@ -121,6 +145,14 @@ async def chat_endpoint(request: ChatRequest):
         if cache_result.status == "hit" and cache_result.entry:
             total_latency = (time.perf_counter() - start_time) * 1000
             cached = cache_result.entry
+            telemetry_rec = telemetry_collector.record_success(
+                route="semantic_cache",
+                provider="cache",
+                model=None,
+                execution_time_ms=total_latency,
+                inference_latency_ms=0.0,
+                token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0, is_estimated=False)
+            )
             return ChatResponse(
                 query=query,
                 answer=cached.answer,
@@ -146,11 +178,18 @@ async def chat_endpoint(request: ChatRequest):
                     "original_provider": cached.provider,
                     "original_model": cached.model,
                     "reasoning": "Answer reused from precision-first semantic cache with verified compatibility; 0 model inference calls."
-                }
+                },
+                telemetry=telemetry_rec
             )
         else:
             cache_status = "miss"
             if route_pref == "semantic_cache":
+                telemetry_collector.record_failure(
+                    route="semantic_cache",
+                    provider="cache",
+                    execution_time_ms=(time.perf_counter() - start_time) * 1000,
+                    error_message="Cache miss: no compatible cached response found."
+                )
                 raise HTTPException(
                     status_code=404,
                     detail="Cache miss: no compatible cached response found."
@@ -170,6 +209,12 @@ async def chat_endpoint(request: ChatRequest):
         else:
             tier = "small"
     else:
+        telemetry_collector.record_failure(
+            route=request.preferred_route or "invalid",
+            provider="unknown",
+            execution_time_ms=(time.perf_counter() - start_time) * 1000,
+            error_message=f"Unsupported route preference '{request.preferred_route}'."
+        )
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported route preference '{request.preferred_route}'."
@@ -230,6 +275,17 @@ async def chat_endpoint(request: ChatRequest):
                 "requires_reasoning": analysis.requires_reasoning
             })
 
+        gpu_meta = resp.raw_metadata.get("gpu_telemetry") if resp.raw_metadata else None
+        telemetry_rec = telemetry_collector.record_success(
+            route=tier_display,
+            provider=resp.provider_name,
+            model=resp.model_name,
+            execution_time_ms=total_latency,
+            inference_latency_ms=resp.latency_ms,
+            token_usage=resp.usage,
+            gpu_telemetry=gpu_meta
+        )
+
         return ChatResponse(
             query=query,
             answer=resp.content,
@@ -241,11 +297,50 @@ async def chat_endpoint(request: ChatRequest):
             large_model_avoided=large_model_avoided,
             cache_status=cache_status,
             cache_similarity=cache_similarity,
-            metadata=metadata
+            metadata=metadata,
+            telemetry=telemetry_rec
         )
     except ProviderUnavailableError as pue:
+        telemetry_collector.record_failure(
+            route=tier,
+            provider="unknown",
+            model=None,
+            execution_time_ms=(time.perf_counter() - start_time) * 1000,
+            error_message=str(pue)
+        )
         raise HTTPException(status_code=503, detail=str(pue))
     except ValueError as ve:
+        telemetry_collector.record_failure(
+            route=tier,
+            provider="unknown",
+            model=None,
+            execution_time_ms=(time.perf_counter() - start_time) * 1000,
+            error_message=str(ve)
+        )
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
+        telemetry_collector.record_failure(
+            route=tier,
+            provider="unknown",
+            model=None,
+            execution_time_ms=(time.perf_counter() - start_time) * 1000,
+            error_message=str(e)
+        )
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/telemetry/recent", response_model=List[TelemetryRecord])
+def get_recent_telemetry(limit: int = 50):
+    """Return recently captured real telemetry records."""
+    return telemetry_collector.get_recent(limit=limit)
+
+@router.get("/telemetry/summary", response_model=TelemetrySummary)
+def get_telemetry_summary():
+    """Return aggregated telemetry metrics across all captured requests."""
+    return telemetry_collector.get_summary()
+
+@router.post("/telemetry/clear")
+def clear_telemetry():
+    """Clear recorded in-memory telemetry."""
+    telemetry_collector.clear()
+    return {"message": "Telemetry records cleared successfully."}
+

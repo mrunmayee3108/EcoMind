@@ -14,6 +14,8 @@ class TokenUsageSchema(BaseModel):
     total_tokens: Optional[int] = None
     is_estimated: bool = False
 
+from telemetry.schemas import TelemetryRecord, TelemetrySummary
+
 class ChatResponse(BaseModel):
     query: str
     answer: str
@@ -26,6 +28,7 @@ class ChatResponse(BaseModel):
     cache_status: Optional[str] = Field(default="not_checked", description="'not_checked', 'miss', 'hit'")
     cache_similarity: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
+    telemetry: Optional[TelemetryRecord] = None
 
 class CacheStatsSchema(BaseModel):
     enabled: bool
