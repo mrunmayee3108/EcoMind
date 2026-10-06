@@ -30,11 +30,12 @@ backend/
 │   ├── provider.py             # ModelProvider base class & ProviderResponse
 │   ├── gemini_provider.py      # Google GenAI provider with authentic token usage
 │   ├── groq_provider.py        # Groq LPU provider with authentic token usage
-│   ├── local_provider.py       # Ollama integration with NVML GPU power monitoring
+│   ├── local_provider.py       # Ollama integration with generic measurement provider sampling
 │   └── model_profiles.py       # Catalog for small, medium, large tiers
 ├── telemetry/
 │   ├── __init__.py             # Telemetry module exports
-│   ├── schemas.py              # TelemetryRecord, ProvenanceStatus, GpuTelemetry models
+│   ├── schemas.py              # TelemetryRecord, ProvenanceStatus, GpuTelemetry, PhysicalMeasurement models
+│   ├── measurement.py          # Generic MeasurementProvider interface (NvidiaNvml, Android, Apple, Unavailable)
 │   ├── gpu.py                  # High-speed NVML / nvidia-smi GPU power & energy sampler
 │   └── telemetry.py            # Central thread-safe TelemetryCollector
 ├── tools/
@@ -126,13 +127,20 @@ npm run dev
   - **Lifecycle & Storage Controls**: Configurable entry cap (`MAX_CACHE_ENTRIES`), expiration policy (`CACHE_TTL_DAYS`), LRU eviction, disk storage telemetry, and manual reset capability.
   - **Telemetry**: Exposes `cache_status` (`not_checked`, `miss`, `hit`), `cache_similarity`, `cache_hits`, `cache_misses`, disk footprint (`storage_size_bytes`, `storage_size_kb`), and reports 0 tokens on cache hit.
   - **Persistence**: SQLite metadata storage + FAISS vector index persistence.
+- **Phase 5A — Hardware-Agnostic Telemetry & Measurement Architecture**: Completed and verified (117 tests passing).
+  - Implemented generic `MeasurementProvider` abstraction with `NvidiaNvmlProvider`, `AndroidEnergyProvider`, `AppleEnergyProvider`, and `UnavailableProvider`.
+  - Enforced explicit, non-conflated measurement scopes (`GPU_INFERENCE_WINDOW`, `DEVICE`, `SYSTEM`, `CLOUD_INFERENCE`, `UNKNOWN`) so energy numbers are never ambiguously grouped.
+  - Decoupled `TelemetryCollector` from NVIDIA code to accept generic `PhysicalMeasurement` records.
+  - Preserved authentic on-device NVIDIA GPU power/energy sampling via direct NVML ctypes C-binding with `nvidia-smi` fallback and explicit limitation labeling.
+  - Implemented architectural ingestion contracts for future native mobile clients (Android / Apple) without pretending the Python server directly reads remote phone hardware.
+  - Added system capabilities introspection (`GET /telemetry/capabilities`) with graceful degradation: uses best real measurement source available, returns `null` + `UNAVAILABLE` otherwise, and never substitutes synthetic estimates.
 
-### Tool & Semantic Cache Execution Flow
+### End-to-End Execution & Telemetry Flow
 ```text
 User Query
     ↓
 1. Deterministic Tool Detection
-    ├── Matched → Appropriate Deterministic Tool (0 tokens, < 1ms) → Answer
+    ├── Matched → Appropriate Deterministic Tool (0 tokens, < 1ms)
     └── No Tool Match
           ↓
 2. Semantic Cache Check (Two-Stage Verification)
@@ -147,7 +155,15 @@ User Query
                                 ↓
                         5. Model Dispatcher (Groq / Gemini / Ollama)
                                 ↓
-                        6. Store Result in Semantic Cache (if cacheable & bounded) & Return Answer
+                        6. Store Result in Semantic Cache (if cacheable & bounded)
+                                ↓
+7. Hardware-Agnostic Telemetry & Measurement Layer
+    ├── Token Tracking (PROVIDER_REPORTED / MEASURED 0)
+    ├── Latency Profiling (MEASURED ms)
+    ├── Physical Measurement (GPU_INFERENCE_WINDOW / DEVICE / CLOUD_INFERENCE)
+    └── Capability Reporting (GET /telemetry/capabilities)
+          ↓
+     Final Answer + Execution Telemetry Record
 ```
 
 ### Accuracy-First Semantic Cache Policy
@@ -219,7 +235,7 @@ When `add_entry` is called and the cache has reached `MAX_CACHE_ENTRIES`, safe t
 
 Phase 5A establishes the authentic measurement foundation for EcoMind without fabricating environmental numbers or hardcoding synthetic constants. The measurement layer is fully decoupled from any single vendor via a provider- and capability-based measurement architecture.
 
-> **Developer Note**:  
+> **Note**:  
 > "EcoMind is measurement-capability aware. Physical energy is reported only when a trustworthy measurement source is available. The absence of a measurement is represented explicitly rather than replaced with a fabricated estimate."
 
 ### 1. Telemetry Architecture
