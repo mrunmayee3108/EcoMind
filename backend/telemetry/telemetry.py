@@ -6,6 +6,9 @@ from typing import Optional, List, Dict, Any, Union
 
 from .schemas import (
     ProvenanceStatus,
+    MeasurementScope,
+    MeasurementCapabilities,
+    PhysicalMeasurement,
     TokenTelemetry,
     LatencyTelemetry,
     GpuTelemetry,
@@ -13,14 +16,20 @@ from .schemas import (
     TelemetryRecord,
     TelemetrySummary
 )
+from .measurement import (
+    MeasurementProvider,
+    get_system_measurement_capabilities,
+)
 from models.provider import TokenUsage
 
 class TelemetryCollector:
     """
     Central telemetry management component for EcoMind Phase 5A.
     Accurately records real execution telemetry (timestamps, routes, providers,
-    tokens, latencies, success/failure, and on-device GPU power/energy measurements)
+    tokens, latencies, success/failure, and hardware-agnostic physical measurements)
     with strict data provenance and zero fabrication.
+
+    Decoupled from specific hardware implementations via the MeasurementProvider interface.
     """
 
     def __init__(self, max_records: int = 1000):
@@ -36,6 +45,7 @@ class TelemetryCollector:
         model: Optional[str] = None,
         inference_latency_ms: Optional[float] = None,
         token_usage: Optional[Union[TokenUsage, Dict[str, Any]]] = None,
+        physical_measurement: Optional[Union[PhysicalMeasurement, Dict[str, Any]]] = None,
         gpu_telemetry: Optional[Union[GpuTelemetry, Dict[str, Any]]] = None,
         request_id: Optional[str] = None
     ) -> TelemetryRecord:
@@ -53,8 +63,12 @@ class TelemetryCollector:
             provenance=ProvenanceStatus.MEASURED
         )
 
-        # 3. Environmental Telemetry & Provenance
-        env = self._resolve_environmental_telemetry(gpu_telemetry)
+        # 3. Environmental Telemetry & Provenance (Hardware-Agnostic)
+        env = self._resolve_environmental_telemetry(
+            provider=provider,
+            physical_measurement=physical_measurement,
+            gpu_telemetry=gpu_telemetry
+        )
 
         record = TelemetryRecord(
             request_id=req_id,
@@ -111,7 +125,19 @@ class TelemetryCollector:
                 water_liters=None,
                 carbon_gco2e=None,
                 provenance=ProvenanceStatus.UNAVAILABLE,
-                gpu_telemetry=None
+                gpu_telemetry=None,
+                measurement=PhysicalMeasurement(
+                    value=None,
+                    unit="J",
+                    provenance=ProvenanceStatus.UNAVAILABLE,
+                    source="UnavailableProvider",
+                    scope=MeasurementScope.UNKNOWN,
+                    status="UNAVAILABLE",
+                    timestamp=ts,
+                    details={"error": str(error_message)}
+                ),
+                measurement_capabilities=get_system_measurement_capabilities(),
+                note="Execution failed; physical environmental telemetry is UNAVAILABLE."
             )
         )
 
@@ -170,13 +196,27 @@ class TelemetryCollector:
 
     def _resolve_environmental_telemetry(
         self,
+        provider: str,
+        physical_measurement: Optional[Union[PhysicalMeasurement, Dict[str, Any]]],
         gpu_telemetry: Optional[Union[GpuTelemetry, Dict[str, Any]]]
     ) -> EnvironmentalTelemetry:
         """
-        Resolve environmental metrics with zero fabrication.
-        For cloud APIs (Groq, Google), physical energy, water, and carbon are UNAVAILABLE.
-        For local GPU execution, physical GPU energy is attached when directly sampled.
+        Resolve environmental metrics with zero fabrication and strict provenance.
+        Supports generic PhysicalMeasurement, with backward compatibility for GpuTelemetry.
+        Cloud APIs (Groq, Google) have physical energy marked as UNAVAILABLE.
         """
+        ts = datetime.now(timezone.utc).isoformat()
+        sys_caps = get_system_measurement_capabilities()
+
+        # Parse physical_measurement if provided
+        meas_obj: Optional[PhysicalMeasurement] = None
+        if physical_measurement is not None:
+            if isinstance(physical_measurement, dict):
+                meas_obj = PhysicalMeasurement(**physical_measurement)
+            elif isinstance(physical_measurement, PhysicalMeasurement):
+                meas_obj = physical_measurement
+
+        # Parse gpu_telemetry if provided (backward compatibility)
         gpu_obj: Optional[GpuTelemetry] = None
         if gpu_telemetry is not None:
             if isinstance(gpu_telemetry, dict):
@@ -184,15 +224,91 @@ class TelemetryCollector:
             elif isinstance(gpu_telemetry, GpuTelemetry):
                 gpu_obj = gpu_telemetry
 
-        if gpu_obj and gpu_obj.provenance == ProvenanceStatus.MEASURED and gpu_obj.energy_joules is not None:
+        # If gpu_telemetry was provided but meas_obj was not, bridge it into a PhysicalMeasurement
+        if gpu_obj is not None and meas_obj is None:
+            if gpu_obj.provenance == ProvenanceStatus.MEASURED and gpu_obj.energy_joules is not None:
+                meas_obj = PhysicalMeasurement(
+                    value=gpu_obj.energy_joules,
+                    unit="J",
+                    provenance=ProvenanceStatus.MEASURED,
+                    source=gpu_obj.source or "NvidiaNvmlProvider",
+                    scope=gpu_obj.scope or MeasurementScope.GPU_INFERENCE_WINDOW,
+                    device_platform=gpu_obj.device_name or "NVIDIA GPU",
+                    status="AVAILABLE",
+                    timestamp=ts,
+                    details={
+                        "label": gpu_obj.label,
+                        "average_power_watts": gpu_obj.average_power_watts,
+                        "peak_power_watts": gpu_obj.peak_power_watts,
+                        "sample_count": gpu_obj.sample_count,
+                        "measurement_duration_ms": gpu_obj.measurement_duration_ms
+                    }
+                )
+            else:
+                meas_obj = PhysicalMeasurement(
+                    value=None,
+                    unit="J",
+                    provenance=ProvenanceStatus.UNAVAILABLE,
+                    source=gpu_obj.source or "NvidiaNvmlProvider",
+                    scope=gpu_obj.scope or MeasurementScope.GPU_INFERENCE_WINDOW,
+                    device_platform=gpu_obj.device_name,
+                    status="UNAVAILABLE",
+                    timestamp=ts,
+                    details={"label": gpu_obj.label}
+                )
+
+        # If meas_obj was provided and is MEASURED
+        if meas_obj and meas_obj.provenance == ProvenanceStatus.MEASURED and meas_obj.value is not None:
+            # If scope is GPU_INFERENCE_WINDOW and gpu_obj is missing, bridge back to gpu_obj
+            if meas_obj.scope == MeasurementScope.GPU_INFERENCE_WINDOW and gpu_obj is None:
+                det = meas_obj.details or {}
+                gpu_obj = GpuTelemetry(
+                    device_name=meas_obj.device_platform,
+                    average_power_watts=det.get("average_power_watts"),
+                    peak_power_watts=det.get("peak_power_watts"),
+                    energy_joules=meas_obj.value,
+                    sample_count=det.get("sample_count", 1),
+                    measurement_duration_ms=det.get("measurement_duration_ms"),
+                    provenance=ProvenanceStatus.MEASURED,
+                    label=det.get("label", "MEASURED GPU ENERGY (INFERENCE WINDOW ONLY - NOT TOTAL SYSTEM ENERGY)"),
+                    scope=meas_obj.scope,
+                    source=meas_obj.source
+                )
+
+            caps = MeasurementCapabilities(
+                gpu_energy="supported" if meas_obj.scope == MeasurementScope.GPU_INFERENCE_WINDOW else "unavailable",
+                system_energy="supported" if meas_obj.scope == MeasurementScope.SYSTEM else "unavailable",
+                device_energy="supported" if meas_obj.scope == MeasurementScope.DEVICE else "unavailable",
+                provider_energy="supported" if meas_obj.provenance == ProvenanceStatus.PROVIDER_REPORTED else "unavailable"
+            )
+
             return EnvironmentalTelemetry(
-                energy_joules=gpu_obj.energy_joules,
+                energy_joules=meas_obj.value,
                 water_liters=None,
                 carbon_gco2e=None,
                 provenance=ProvenanceStatus.MEASURED,
                 gpu_telemetry=gpu_obj,
-                note="Physical GPU energy directly measured on-device. Does not represent total system energy. Water and carbon are UNAVAILABLE."
+                measurement=meas_obj,
+                measurement_capabilities=caps,
+                note=(
+                    f"Physical energy directly measured ({meas_obj.scope.value} via {meas_obj.source}). "
+                    "Does NOT represent total system energy. Water and carbon are UNAVAILABLE."
+                )
             )
+
+        # Execution without real physical measurement (Cloud APIs, tools, cache, or unavailable hardware)
+        cloud_scope = MeasurementScope.CLOUD_INFERENCE if provider in ("groq", "google") else MeasurementScope.UNKNOWN
+        fallback_meas = meas_obj or PhysicalMeasurement(
+            value=None,
+            unit="J",
+            provenance=ProvenanceStatus.UNAVAILABLE,
+            source="UnavailableProvider",
+            scope=cloud_scope,
+            device_platform=None,
+            status="UNAVAILABLE",
+            timestamp=ts,
+            details={"note": f"Physical measurement unavailable for provider '{provider}'."}
+        )
 
         return EnvironmentalTelemetry(
             energy_joules=None,
@@ -200,8 +316,14 @@ class TelemetryCollector:
             carbon_gco2e=None,
             provenance=ProvenanceStatus.UNAVAILABLE,
             gpu_telemetry=None,
-            note="Physical environmental metrics are UNAVAILABLE for cloud APIs and non-GPU executions in Phase 5A (zero fabrication)."
+            measurement=fallback_meas,
+            measurement_capabilities=sys_caps,
+            note="Physical environmental metrics are UNAVAILABLE for cloud APIs and non-measured executions in Phase 5A (zero fabrication)."
         )
+
+    def get_capabilities(self) -> MeasurementCapabilities:
+        """Return the physical measurement capabilities supported by the host environment."""
+        return get_system_measurement_capabilities()
 
     def get_recent(self, limit: int = 50) -> List[TelemetryRecord]:
         """Return the most recent telemetry records in reverse chronological order."""
@@ -216,6 +338,7 @@ class TelemetryCollector:
 
         summary = TelemetrySummary()
         summary.total_requests = len(items)
+        summary.measurement_capabilities = self.get_capabilities()
 
         for rec in items:
             if rec.success:
@@ -225,6 +348,9 @@ class TelemetryCollector:
 
             if rec.tokens.total_tokens:
                 summary.total_tokens_recorded += rec.tokens.total_tokens
+
+            if rec.environment.provenance == ProvenanceStatus.MEASURED:
+                summary.physical_measured_requests += 1
 
             if rec.environment.gpu_telemetry and rec.environment.gpu_telemetry.provenance == ProvenanceStatus.MEASURED:
                 summary.gpu_measured_requests += 1

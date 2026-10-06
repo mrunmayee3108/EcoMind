@@ -13,6 +13,50 @@ class ProvenanceStatus(str, Enum):
     PROVIDER_REPORTED = "PROVIDER_REPORTED"
     UNAVAILABLE = "UNAVAILABLE"
 
+class MeasurementScope(str, Enum):
+    """
+    Explicit physical boundary/scope for what was actually measured.
+    Do NOT call all device measurements simply 'energy'.
+    The scope specifies the exact measurement boundary.
+    """
+    GPU_INFERENCE_WINDOW = "GPU_INFERENCE_WINDOW"
+    DEVICE = "DEVICE"
+    SYSTEM = "SYSTEM"
+    CLOUD_INFERENCE = "CLOUD_INFERENCE"
+    UNKNOWN = "UNKNOWN"
+
+class MeasurementCapabilities(BaseModel):
+    """
+    Capability response structure defining which physical measurement sources
+    are supported or unavailable on the host system / active execution path.
+    """
+    gpu_energy: str = Field(default="unavailable", description="'supported' or 'unavailable'")
+    system_energy: str = Field(default="unavailable", description="'supported' or 'unavailable'")
+    device_energy: str = Field(default="unavailable", description="'supported' or 'unavailable'")
+    provider_energy: str = Field(default="unavailable", description="'supported' or 'unavailable'")
+
+class PhysicalMeasurement(BaseModel):
+    """
+    Platform-agnostic physical measurement data container.
+    Captures measured energy/power with strict provenance, explicit scope,
+    and capability availability status.
+    """
+    value: Optional[float] = Field(default=None, description="Measured numeric energy value (e.g. in Joules)")
+    unit: str = Field(default="J", description="Unit of measurement (e.g., J for Joules)")
+    provenance: ProvenanceStatus = Field(
+        default=ProvenanceStatus.UNAVAILABLE,
+        description="Authentic provenance: MEASURED, PROVIDER_REPORTED, or UNAVAILABLE"
+    )
+    source: str = Field(default="UnavailableProvider", description="Measurement provider/sensor source name")
+    scope: MeasurementScope = Field(default=MeasurementScope.UNKNOWN, description="Explicit measurement boundary/scope")
+    device_platform: Optional[str] = Field(default=None, description="Physical device or platform identifier")
+    status: str = Field(
+        default="UNAVAILABLE",
+        description="Capability availability status (e.g. AVAILABLE, UNAVAILABLE) - NOT statistical confidence"
+    )
+    timestamp: Optional[str] = Field(default=None, description="ISO-8601 UTC timestamp of measurement")
+    details: Dict[str, Any] = Field(default_factory=dict, description="Additional vendor or sensor telemetry metadata")
+
 class TokenTelemetry(BaseModel):
     """Accurately records token counts without fabricating values."""
     input_tokens: Optional[int] = Field(default=None, description="Prompt/input tokens consumed")
@@ -57,6 +101,14 @@ class GpuTelemetry(BaseModel):
         default="MEASURED GPU ENERGY (INFERENCE WINDOW ONLY - NOT TOTAL SYSTEM ENERGY)",
         description="Explicit limitation disclaimer"
     )
+    scope: MeasurementScope = Field(
+        default=MeasurementScope.GPU_INFERENCE_WINDOW,
+        description="Explicit measurement boundary"
+    )
+    source: str = Field(
+        default="NvidiaNvmlProvider",
+        description="Sensor or measurement provider source"
+    )
 
 class EnvironmentalTelemetry(BaseModel):
     """
@@ -66,7 +118,7 @@ class EnvironmentalTelemetry(BaseModel):
     """
     energy_joules: Optional[float] = Field(
         default=None,
-        description="Physical energy consumed. Null for cloud APIs; populated only when on-device GPU is measured."
+        description="Physical energy consumed. Null for cloud APIs; populated only when on-device measurement is sampled."
     )
     water_liters: Optional[float] = Field(
         default=None,
@@ -83,6 +135,14 @@ class EnvironmentalTelemetry(BaseModel):
     gpu_telemetry: Optional[GpuTelemetry] = Field(
         default=None,
         description="Physical GPU measurements if local GPU execution was sampled"
+    )
+    measurement: Optional[PhysicalMeasurement] = Field(
+        default=None,
+        description="Platform-agnostic physical measurement structure"
+    )
+    measurement_capabilities: MeasurementCapabilities = Field(
+        default_factory=MeasurementCapabilities,
+        description="Capability response indicating which measurement sources are supported"
     )
     note: str = Field(
         default="Physical environmental data is UNAVAILABLE for cloud APIs in Phase 5A. Local GPU energy is populated only when measured on-device.",
@@ -109,5 +169,7 @@ class TelemetrySummary(BaseModel):
     failed_requests: int = 0
     total_tokens_recorded: int = 0
     gpu_measured_requests: int = 0
+    physical_measured_requests: int = 0
     routes_breakdown: Dict[str, int] = Field(default_factory=dict)
     providers_breakdown: Dict[str, int] = Field(default_factory=dict)
+    measurement_capabilities: MeasurementCapabilities = Field(default_factory=MeasurementCapabilities)

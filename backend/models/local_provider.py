@@ -20,9 +20,9 @@ class LocalProvider(ModelProvider):
             if target_model == "local-small":
                 target_model = "qwen2.5:0.5b"
 
-            from telemetry.gpu import GpuEnergyMonitor
-            gpu_monitor = GpuEnergyMonitor()
-            gpu_monitor.start()
+            from telemetry.measurement import get_default_measurement_provider
+            meas_provider = get_default_measurement_provider()
+            meas_provider.start_measurement()
             start_time = time.perf_counter()
             try:
                 with httpx.Client(timeout=0.4) as client:
@@ -35,7 +35,7 @@ class LocalProvider(ModelProvider):
                         }
                     )
             finally:
-                gpu_monitor.stop()
+                meas_provider.stop_measurement()
 
             if res.status_code == 200:
                 data = res.json()
@@ -43,15 +43,17 @@ class LocalProvider(ModelProvider):
                 prompt_tokens = data.get("prompt_eval_count")
                 eval_tokens = data.get("eval_count")
                 total_tokens = (prompt_tokens or 0) + (eval_tokens or 0) if prompt_tokens or eval_tokens else None
-                gpu_telemetry = gpu_monitor.get_telemetry()
+                measurement = meas_provider.get_measurement()
                 
                 raw_metadata = {
                     "backend": "ollama",
                     "ollama_model": data.get("model", target_model),
                     "total_duration_ns": data.get("total_duration")
                 }
-                if gpu_telemetry.provenance.value == "MEASURED":
-                    raw_metadata["gpu_telemetry"] = gpu_telemetry.model_dump()
+                if measurement.provenance.value == "MEASURED":
+                    raw_metadata["physical_measurement"] = measurement.model_dump()
+                    if hasattr(meas_provider, "to_gpu_telemetry"):
+                        raw_metadata["gpu_telemetry"] = meas_provider.to_gpu_telemetry().model_dump()
 
                 return ProviderResponse(
                     content=data.get("response", ""),

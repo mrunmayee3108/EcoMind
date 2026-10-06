@@ -18,7 +18,7 @@ from models.model_profiles import list_all_profiles
 from models.provider import TokenUsage
 from cache.semantic_cache import semantic_cache
 from telemetry.telemetry import telemetry_collector
-from telemetry.schemas import TelemetryRecord, TelemetrySummary
+from telemetry.schemas import TelemetryRecord, TelemetrySummary, MeasurementCapabilities
 
 router = APIRouter()
 
@@ -275,6 +275,7 @@ async def chat_endpoint(request: ChatRequest):
                 "requires_reasoning": analysis.requires_reasoning
             })
 
+        phys_meta = resp.raw_metadata.get("physical_measurement") if resp.raw_metadata else None
         gpu_meta = resp.raw_metadata.get("gpu_telemetry") if resp.raw_metadata else None
         telemetry_rec = telemetry_collector.record_success(
             route=tier_display,
@@ -283,6 +284,7 @@ async def chat_endpoint(request: ChatRequest):
             execution_time_ms=total_latency,
             inference_latency_ms=resp.latency_ms,
             token_usage=resp.usage,
+            physical_measurement=phys_meta,
             gpu_telemetry=gpu_meta
         )
 
@@ -327,6 +329,11 @@ async def chat_endpoint(request: ChatRequest):
             error_message=str(e)
         )
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/telemetry/capabilities", response_model=MeasurementCapabilities)
+def get_telemetry_capabilities():
+    """Return physical energy measurement capabilities of the host system."""
+    return telemetry_collector.get_capabilities()
 
 @router.get("/telemetry/recent", response_model=List[TelemetryRecord])
 def get_recent_telemetry(limit: int = 50):

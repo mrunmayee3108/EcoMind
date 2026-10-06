@@ -7,6 +7,9 @@ from main import app
 from models.provider import ProviderResponse, TokenUsage
 from telemetry.schemas import (
     ProvenanceStatus,
+    MeasurementScope,
+    MeasurementCapabilities,
+    PhysicalMeasurement,
     TokenTelemetry,
     LatencyTelemetry,
     GpuTelemetry,
@@ -15,10 +18,19 @@ from telemetry.schemas import (
 )
 from telemetry.telemetry import TelemetryCollector, telemetry_collector
 from telemetry.gpu import GpuEnergyMonitor, NVMLDevice, FallbackNvidiaSmi
+from telemetry.measurement import (
+    MeasurementProvider,
+    NvidiaNvmlProvider,
+    AndroidEnergyProvider,
+    AppleEnergyProvider,
+    UnavailableProvider,
+    get_default_measurement_provider,
+    get_system_measurement_capabilities,
+)
 from cache.semantic_cache import semantic_cache
 
 class TestTelemetryUnit(unittest.TestCase):
-    """Unit tests for the modular telemetry layer in Phase 5A."""
+    """Unit tests for the hardware-agnostic modular telemetry layer in Phase 5A."""
 
     def setUp(self):
         self.collector = TelemetryCollector()
@@ -140,9 +152,12 @@ class TestTelemetryUnit(unittest.TestCase):
         self.assertIsNone(record.environment.carbon_gco2e)
         self.assertEqual(record.environment.provenance, ProvenanceStatus.UNAVAILABLE)
         self.assertIsNone(record.environment.gpu_telemetry)
+        self.assertIsNotNone(record.environment.measurement)
+        self.assertEqual(record.environment.measurement.provenance, ProvenanceStatus.UNAVAILABLE)
+        self.assertEqual(record.environment.measurement.scope, MeasurementScope.CLOUD_INFERENCE)
 
-    def test_local_gpu_telemetry(self):
-        """7. Local GPU telemetry: Direct physical measurement on supported hardware."""
+    def test_local_gpu_telemetry_legacy_monitor(self):
+        """7. Local GPU telemetry: Backward-compatible GpuEnergyMonitor interface."""
         monitor = GpuEnergyMonitor(sample_interval_ms=10.0)
         if monitor.is_hardware_available:
             with monitor:
@@ -177,6 +192,188 @@ class TestTelemetryUnit(unittest.TestCase):
             gpu_res = monitor.get_telemetry()
             self.assertEqual(gpu_res.provenance, ProvenanceStatus.UNAVAILABLE)
             self.assertIsNone(gpu_res.energy_joules)
+
+    def test_generic_measurement_interface_abstraction(self):
+        """8. Generic measurement interface: Verify ABC enforcement and null UnavailableProvider behavior."""
+        # MeasurementProvider cannot be instantiated directly without abstract methods
+        with self.assertRaises(TypeError):
+            MeasurementProvider()
+
+        # UnavailableProvider adheres to interface and safely returns UNAVAILABLE
+        unavail = UnavailableProvider()
+        self.assertFalse(unavail.is_available())
+        caps = unavail.get_capabilities()
+        self.assertEqual(caps.gpu_energy, "unavailable")
+        self.assertEqual(caps.system_energy, "unavailable")
+        self.assertEqual(caps.device_energy, "unavailable")
+        self.assertEqual(caps.provider_energy, "unavailable")
+
+        meas = unavail.get_measurement()
+        self.assertIsNone(meas.value)
+        self.assertEqual(meas.unit, "J")
+        self.assertEqual(meas.provenance, ProvenanceStatus.UNAVAILABLE)
+        self.assertEqual(meas.scope, MeasurementScope.UNKNOWN)
+        self.assertEqual(meas.status, "UNAVAILABLE")
+
+    def test_nvidia_nvml_provider_when_available(self):
+        """9. NVIDIA available: Directly verifies NvidiaNvmlProvider measures GPU energy with strict limitation labeling."""
+        provider = NvidiaNvmlProvider(sample_interval_ms=10.0)
+        if provider.is_available():
+            with provider:
+                time.sleep(0.05)  # 50ms window
+            meas = provider.get_measurement()
+            self.assertEqual(meas.provenance, ProvenanceStatus.MEASURED)
+            self.assertEqual(meas.scope, MeasurementScope.GPU_INFERENCE_WINDOW)
+            self.assertEqual(meas.source, "NvidiaNvmlProvider")
+            self.assertEqual(meas.status, "AVAILABLE")
+            self.assertIsNotNone(meas.value)
+            self.assertGreater(meas.value, 0.0)
+            self.assertIn("NOT TOTAL SYSTEM ENERGY", meas.details["label"])
+            self.assertIn("MEASURED GPU ENERGY", meas.details["label"])
+
+            # Capabilities confirm GPU energy is supported
+            caps = provider.get_capabilities()
+            self.assertEqual(caps.gpu_energy, "supported")
+            self.assertEqual(caps.system_energy, "unavailable")
+            self.assertEqual(caps.device_energy, "unavailable")
+        else:
+            # Dev environment without NVIDIA GPU
+            meas = provider.get_measurement()
+            self.assertEqual(meas.provenance, ProvenanceStatus.UNAVAILABLE)
+            self.assertIsNone(meas.value)
+
+    def test_nvidia_nvml_provider_when_unavailable_does_not_fail(self):
+        """10. NVIDIA unavailable: Gracefully returns UNAVAILABLE without failing or raising exceptions."""
+        with patch.object(NVMLDevice, "_initialize", lambda self: None), \
+             patch.object(FallbackNvidiaSmi, "is_available", return_value=False):
+            mock_provider = NvidiaNvmlProvider()
+            mock_provider._device.available = False
+
+            self.assertFalse(mock_provider.is_available())
+            caps = mock_provider.get_capabilities()
+            self.assertEqual(caps.gpu_energy, "unavailable")
+
+            # Executing sampling window does not fail
+            with mock_provider:
+                time.sleep(0.01)
+
+            meas = mock_provider.get_measurement()
+            self.assertEqual(meas.provenance, ProvenanceStatus.UNAVAILABLE)
+            self.assertIsNone(meas.value)
+            self.assertEqual(meas.status, "UNAVAILABLE")
+            self.assertEqual(meas.scope, MeasurementScope.GPU_INFERENCE_WINDOW)
+
+    def test_android_energy_provider_architecture(self):
+        """11. Android client provider: Interface architecture for native clients; never fabricates values."""
+        # Case A: Default without client telemetry transmission -> strictly UNAVAILABLE
+        android = AndroidEnergyProvider()
+        self.assertFalse(android.is_available())
+        caps = android.get_capabilities()
+        self.assertEqual(caps.device_energy, "unavailable")
+
+        meas = android.get_measurement()
+        self.assertIsNone(meas.value)
+        self.assertEqual(meas.provenance, ProvenanceStatus.UNAVAILABLE)
+        self.assertEqual(meas.scope, MeasurementScope.DEVICE)
+        self.assertEqual(meas.status, "UNAVAILABLE")
+        self.assertIn("future work", meas.details["note"].lower())
+
+        # Case B: Ingesting authentic native client telemetry payload
+        client_payload = {
+            "energy_joules": 0.354,
+            "unit": "J",
+            "provenance": "MEASURED",
+            "device_model": "Google Pixel 8",
+            "sample_rate_hz": 100
+        }
+        ingested = android.ingest_client_telemetry(client_payload)
+        self.assertTrue(android.is_available())
+        self.assertEqual(ingested.provenance, ProvenanceStatus.MEASURED)
+        self.assertEqual(ingested.value, 0.354)
+        self.assertEqual(ingested.scope, MeasurementScope.DEVICE)
+        self.assertEqual(ingested.device_platform, "Google Pixel 8")
+        self.assertEqual(ingested.status, "AVAILABLE")
+
+    def test_apple_energy_provider_architecture(self):
+        """12. Apple client provider: Interface architecture for macOS / iOS client telemetry; never fabricates values."""
+        # Case A: Default without client transmission -> strictly UNAVAILABLE
+        apple = AppleEnergyProvider()
+        self.assertFalse(apple.is_available())
+        caps = apple.get_capabilities()
+        self.assertEqual(caps.device_energy, "unavailable")
+
+        meas = apple.get_measurement()
+        self.assertIsNone(meas.value)
+        self.assertEqual(meas.provenance, ProvenanceStatus.UNAVAILABLE)
+        self.assertEqual(meas.scope, MeasurementScope.DEVICE)
+        self.assertEqual(meas.status, "UNAVAILABLE")
+
+        # Case B: Ingesting authentic native Apple client telemetry
+        client_payload = {
+            "energy_joules": 0.812,
+            "unit": "J",
+            "provenance": "MEASURED",
+            "device_model": "MacBook Pro M3 Max"
+        }
+        ingested = apple.ingest_client_telemetry(client_payload)
+        self.assertTrue(apple.is_available())
+        self.assertEqual(ingested.provenance, ProvenanceStatus.MEASURED)
+        self.assertEqual(ingested.value, 0.812)
+        self.assertEqual(ingested.scope, MeasurementScope.DEVICE)
+        self.assertEqual(ingested.device_platform, "MacBook Pro M3 Max")
+
+    def test_scope_correctness_and_non_conflation(self):
+        """13. Scope correctness: Scopes explicitly distinguish what was measured; never conflated as generic 'energy'."""
+        self.assertEqual(MeasurementScope.GPU_INFERENCE_WINDOW.value, "GPU_INFERENCE_WINDOW")
+        self.assertEqual(MeasurementScope.DEVICE.value, "DEVICE")
+        self.assertEqual(MeasurementScope.SYSTEM.value, "SYSTEM")
+        self.assertEqual(MeasurementScope.CLOUD_INFERENCE.value, "CLOUD_INFERENCE")
+        self.assertEqual(MeasurementScope.UNKNOWN.value, "UNKNOWN")
+
+        # Record with device scope
+        dev_meas = PhysicalMeasurement(
+            value=0.5,
+            unit="J",
+            provenance=ProvenanceStatus.MEASURED,
+            source="AndroidEnergyProvider",
+            scope=MeasurementScope.DEVICE,
+            status="AVAILABLE"
+        )
+        rec_dev = self.collector.record_success(
+            route="Small Model (Mobile Client)",
+            provider="local_client",
+            execution_time_ms=80.0,
+            physical_measurement=dev_meas
+        )
+        self.assertEqual(rec_dev.environment.measurement.scope, MeasurementScope.DEVICE)
+        self.assertEqual(rec_dev.environment.measurement_capabilities.device_energy, "supported")
+        self.assertEqual(rec_dev.environment.measurement_capabilities.gpu_energy, "unavailable")
+
+    def test_provenance_correctness(self):
+        """14. Provenance correctness: Strictly distinguishes MEASURED, PROVIDER_REPORTED, and UNAVAILABLE without ESTIMATED."""
+        # Confirm valid statuses
+        statuses = [p.value for p in ProvenanceStatus]
+        self.assertIn("MEASURED", statuses)
+        self.assertIn("PROVIDER_REPORTED", statuses)
+        self.assertIn("UNAVAILABLE", statuses)
+        self.assertNotIn("ESTIMATED", statuses, "ESTIMATED must NOT exist in Phase 5A")
+
+    def test_cloud_provider_physical_energy_remains_unavailable(self):
+        """15. Cloud provider integrity: Groq and Google calls leave physical energy strictly UNAVAILABLE."""
+        for provider_name in ["groq", "google"]:
+            rec = self.collector.record_success(
+                route=f"Large Model ({provider_name})",
+                provider=provider_name,
+                model="test-model",
+                execution_time_ms=300.0,
+                token_usage=TokenUsage(prompt_tokens=50, completion_tokens=50, total_tokens=100)
+            )
+            self.assertIsNone(rec.environment.energy_joules)
+            self.assertEqual(rec.environment.provenance, ProvenanceStatus.UNAVAILABLE)
+            self.assertEqual(rec.environment.measurement.provenance, ProvenanceStatus.UNAVAILABLE)
+            self.assertEqual(rec.environment.measurement.scope, MeasurementScope.CLOUD_INFERENCE)
+            self.assertEqual(rec.tokens.provenance, ProvenanceStatus.PROVIDER_REPORTED)
+            self.assertEqual(rec.tokens.total_tokens, 100)
 
 
 class TestTelemetryAPIIntegration(unittest.TestCase):
@@ -218,6 +415,21 @@ class TestTelemetryAPIIntegration(unittest.TestCase):
         self.assertFalse(failed_rec.success)
         self.assertIn("invalid_tier", failed_rec.error_message)
 
+    def test_telemetry_capabilities_endpoint(self):
+        """Verify GET /telemetry/capabilities returns structured capability statuses."""
+        res = self.client.get("/telemetry/capabilities")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+
+        self.assertIn("gpu_energy", data)
+        self.assertIn("system_energy", data)
+        self.assertIn("device_energy", data)
+        self.assertIn("provider_energy", data)
+        self.assertIn(data["gpu_energy"], ["supported", "unavailable"])
+        self.assertIn(data["system_energy"], ["supported", "unavailable"])
+        self.assertIn(data["device_energy"], ["supported", "unavailable"])
+        self.assertIn(data["provider_energy"], ["supported", "unavailable"])
+
     def test_telemetry_endpoints(self):
         """Verify /telemetry/recent, /telemetry/summary, and /telemetry/clear endpoints."""
         # 1. Trigger an operation
@@ -236,6 +448,7 @@ class TestTelemetryAPIIntegration(unittest.TestCase):
         summary_data = summary_res.json()
         self.assertGreaterEqual(summary_data["total_requests"], 1)
         self.assertGreaterEqual(summary_data["successful_requests"], 1)
+        self.assertIn("measurement_capabilities", summary_data)
 
         # 4. POST /telemetry/clear
         clear_res = self.client.post("/telemetry/clear")

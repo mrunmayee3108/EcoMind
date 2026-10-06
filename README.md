@@ -215,54 +215,113 @@ When `add_entry` is called and the cache has reached `MAX_CACHE_ENTRIES`, safe t
 
 ---
 
-## Phase 5A: Telemetry & Measurement Infrastructure
+## Phase 5A: Hardware-Agnostic Telemetry & Measurement Architecture
 
-Phase 5A establishes the authentic measurement foundation for EcoMind without fabricating environmental numbers or hardcoding synthetic constants.
+Phase 5A establishes the authentic measurement foundation for EcoMind without fabricating environmental numbers or hardcoding synthetic constants. The measurement layer is fully decoupled from any single vendor via a provider- and capability-based measurement architecture.
 
-### 1. What Telemetry is Currently Collected
-For every executed request through `/chat`, the telemetry layer captures:
-* **Request Metadata**: `request_id` (UUIDv4), `timestamp` (ISO-8601 UTC), `route` (execution path label), `provider` (cloud or local provider), and `model` (model identifier).
-* **Execution Status**: `success` (boolean flag) and `error_message` (populated on failure).
-* **Token Counts**: `input_tokens`, `output_tokens`, and `total_tokens`.
-* **Latency Profile**: `inference_latency_ms` (provider API roundtrip or tool execution time) and `execution_time_ms` (total control plane processing time).
-* **Environmental Metrics**: Physical `energy_joules` (only when measured on local hardware), with `water_liters` and `carbon_gco2e`.
+> **Developer Note**:  
+> "EcoMind is measurement-capability aware. Physical energy is reported only when a trustworthy measurement source is available. The absence of a measurement is represented explicitly rather than replaced with a fabricated estimate."
 
-### 2. Data Provenance & Classification
+### 1. Telemetry Architecture
+
+The telemetry collector depends strictly on the generic `MeasurementProvider` abstraction rather than directly on vendor-specific code:
+
+```text
+MeasurementProvider (Abstract Interface)
+    ├── NvidiaNvmlProvider       (On-device NVIDIA GPU power sampling via NVML / nvidia-smi)
+    ├── AndroidEnergyProvider    (Architectural interface for native Android client telemetry ingestion)
+    ├── AppleEnergyProvider      (Architectural interface for Apple Silicon / iOS client telemetry ingestion)
+    └── UnavailableProvider      (Safe fallback when no physical measurement source is available)
+```
+
+Every physical measurement captures:
+* `value`: Measured numeric value in Joules (or `null` when unavailable)
+* `unit`: Measurement unit (e.g. `J`)
+* `provenance`: `MEASURED`, `PROVIDER_REPORTED`, or `UNAVAILABLE`
+* `source`: Specific provider or sensor source (e.g. `NvidiaNvmlProvider`, `AndroidEnergyProvider`, `UnavailableProvider`)
+* `scope`: Explicit physical boundary/scope (see Scope Distinction below)
+* `device_platform`: Physical device or platform identifier (e.g. `NVIDIA GeForce RTX 3050 A Laptop GPU`, `Android Client`)
+* `status`: Actual capability availability status (`AVAILABLE` or `UNAVAILABLE`), not statistical confidence
+* `timestamp`: ISO-8601 UTC measurement timestamp
+* `details`: Sensor telemetry metadata (e.g. sampling count, average power watts, peak power watts, duration ms)
+
+### 2. Explicit Measurement Scopes: Non-Conflation of Energy
+
+Measurements must never be labeled simply as "energy". The explicit scope designates precisely what physical boundary was measured:
+
+| Measurement Scope | Description |
+|---|---|
+| `GPU_INFERENCE_WINDOW` | Physical GPU die and memory power draw during the active inference window only. |
+| `DEVICE` | Whole-device battery or power rail consumption on client hardware (e.g., mobile phones, tablets, laptops). |
+| `SYSTEM` | Full server/host power consumption (including CPU, DRAM, motherboard, storage, fans, and PSU losses). |
+| `CLOUD_INFERENCE` | Remote cloud API inference execution where physical hardware measurements are inaccessible. |
+| `UNKNOWN` | Unspecified or fallback measurement scope. |
+
+### 3. Supported Measurement Sources
+
+1. **NVIDIA NVML (`NvidiaNvmlProvider`)**:
+   * **Direct C-Binding**: High-speed, microsecond querying via `ctypes` (`nvmlInit_v2`, `nvmlDeviceGetHandleByIndex_v2`, `nvmlDeviceGetPowerUsage`) with automatic fallback to `nvidia-smi`.
+   * **Inference Window Sampling**: Background thread samples instantaneous GPU wattage during the active model generation window.
+   * **Integrated Energy Calculation**:
+     $$\text{Energy (Joules)} = \text{Average Power (Watts)} \times \text{Duration (seconds)}$$
+   * **Explicit Hardware Limitation Label**:
+     `"MEASURED GPU ENERGY (INFERENCE WINDOW ONLY - NOT TOTAL SYSTEM ENERGY)"`
+   * **Graceful Degradation**: If NVIDIA hardware or NVML is unavailable on the host, the system does not fail the inference request; it returns `null` with `UNAVAILABLE` status.
+
+2. **Native Mobile Clients (`AndroidEnergyProvider` & `AppleEnergyProvider`)**:
+   * **Architectural Ingestion Contract**: The Python backend runs on server/desktop hardware and cannot directly access a user's remote mobile phone hardware or battery sensors. These providers establish the architectural interface for future mobile client apps transmitting authentic device telemetry (e.g., Android `BatteryManager`, hardware power rails, or Apple `powermetrics`) via client telemetry payloads.
+   * **Zero Fabrication**: In the absence of validated client-transmitted telemetry, these providers strictly return `null` with `UNAVAILABLE` status. Android and iOS measurements are never fabricated. Native mobile integration is planned future work.
+
+3. **Cloud Providers (Groq LPUs, Google Gemini TPUs/GPUs)**:
+   * Cloud providers do not expose physical server energy draw, data center PUE, or power rails in their APIs.
+   * Physical energy, water, and carbon remain strictly `null` with `UNAVAILABLE` provenance.
+   * Token counts (`PROVIDER_REPORTED`) and latencies (`MEASURED`) continue to be recorded faithfully. Tokens are never converted into fake Wh values.
+
+### 4. System Capabilities Response & Graceful Degradation
+
+The backend exposes system measurement capabilities via `GET /telemetry/capabilities` and embeds them in every telemetry record:
+
+```json
+{
+  "gpu_energy": "supported",
+  "system_energy": "unavailable",
+  "device_energy": "unavailable",
+  "provider_energy": "unavailable"
+}
+```
+
+The system degrades gracefully according to three principles:
+1. Use the best real, trustworthy measurement source available on the active platform.
+2. If unavailable, return `null` with explicit `UNAVAILABLE` provenance.
+3. **Never substitute an estimate automatically.** Unsupported measurements are explicitly represented as `UNAVAILABLE` rather than estimated.
+
+### 5. Data Provenance & Classification
+
 EcoMind categorizes all telemetry into three strict provenance categories:
 
 | Provenance Status | Description | Used For |
 |---|---|---|
 | `MEASURED` | Directly measured on the host system using high-resolution timers, hardware sensors, or exact mathematical counts. | Total execution time, inference duration, deterministic tool tokens (0), semantic cache tokens (0), on-device GPU power/energy. |
-| `PROVIDER_REPORTED` | Authentic metrics returned directly by model APIs and daemon protocols. | Prompt tokens, completion tokens, and total tokens from Groq (`chat.completion.usage`), Google Gemini (`response.usage_metadata`), and Ollama (`prompt_eval_count`, `eval_count`). |
-| `UNAVAILABLE` | Physical values that cannot be authentically measured on the current system or for cloud providers. | Physical energy, water, and carbon for cloud API calls (Groq, Gemini); tokens/latencies on failed requests. |
+| `PROVIDER_REPORTED` | Authentic metrics returned directly by model APIs and daemon protocols. | Prompt tokens, completion tokens, and total tokens from Groq (`chat.completion.usage`), Google Gemini (`response.usage_metadata`), and Ollama (`prompt_eval_count`, `eval_count`); authentic client-transmitted mobile telemetry. |
+| `UNAVAILABLE` | Physical values that cannot be authentically measured on the current system or for cloud providers. | Physical energy, water, and carbon for cloud API calls (Groq, Gemini); physical energy when hardware/sensor is absent; tokens/latencies on failed requests. |
 
-> **Zero-Fabrication Guarantee**: The system never populates physical energy, water, or carbon with synthetic guesses in Phase 5A. `ESTIMATED` status is deliberately omitted until peer-reviewed estimation models are implemented in Phase 5B.
+> **Zero-Fabrication Guarantee**: `ESTIMATED` status is deliberately omitted until peer-reviewed estimation models are implemented in Phase 5B.
 
-### 3. On-Device Local GPU Power & Energy Measurement
-For local model inference executed on NVIDIA hardware:
-* **Direct NVML C-Binding**: High-speed, microsecond querying via `ctypes` (`nvmlInit_v2`, `nvmlDeviceGetHandleByIndex_v2`, `nvmlDeviceGetPowerUsage`) with automatic fallback to `nvidia-smi`.
-* **Inference Window Sampling**: Background thread samples instantaneous GPU wattage during the active model generation window.
-* **Integrated Energy Calculation**:
-  $$\text{Energy (Joules)} = \text{Average Power (Watts)} \times \text{Duration (seconds)}$$
-* **Explicit Hardware Label**:
-  `"MEASURED GPU ENERGY (INFERENCE WINDOW ONLY - NOT TOTAL SYSTEM ENERGY)"`
+### 6. Limitations
 
-### 4. What Remains Unavailable
-* **Cloud Hardware Power**: Cloud providers (Groq, Google) do not expose physical server energy draw, data center PUE, cooling water usage, or grid emission factors in their API responses.
-* **Non-GPU System Power**: CPU, motherboard, RAM, storage, cooling fans, and PSU power conversion losses are not measured by NVML.
-* **Operational Water & Embodied Carbon**: Data center cooling water evaporation and hardware manufacturing (embodied) carbon cannot be measured at runtime.
-
-### 5. Important Limitations
-1. **GPU Energy vs. System Energy**: MEASURED GPU ENERGY measures only the NVIDIA GPU die and memory power draw during inference. It is **not** the total power consumed by the server or host machine.
+1. **GPU Energy vs. System Energy**: MEASURED GPU ENERGY measures only the NVIDIA GPU die and memory power draw during inference. It is **not** the total power consumed by the server or host machine (CPU, RAM, storage, cooling fans, and PSU conversion losses are excluded).
 2. **Cloud API Boundary**: For Groq LPUs and Google Gemini TPUs/GPUs, physical power cannot be measured by the client. These fields are explicitly marked `UNAVAILABLE` and set to `null`.
-3. **In-Memory Buffer**: Telemetry records are stored in an in-memory thread-safe circular buffer (default: 1000 records). Persistent database storage and aggregation pipelines will follow in later phases.
-4. **Subsequent Roadmap**:
-   * **Phase 5B**: Peer-reviewed environmental accounting formulas for cloud APIs.
+3. **Mobile Client Access**: The backend does not directly access client phone hardware. Mobile telemetry requires client-side transmission.
+4. **In-Memory Buffer**: Telemetry records are stored in an in-memory thread-safe circular buffer (default: 1000 records).
+5. **Subsequent Roadmap**:
+   * **Phase 5B**: Peer-reviewed environmental estimation models for cloud APIs.
    * **Phase 6**: Multi-objective Pareto routing optimizer.
    * **Phase 7**: Comprehensive user-facing Eco Receipts.
 
-### 6. Telemetry API Endpoints
+### 7. Telemetry API Endpoints
+
+* `GET /telemetry/capabilities`: Introspect supported physical measurement capabilities of the host system.
 * `GET /telemetry/recent?limit=50`: Retrieve recent execution telemetry records.
-* `GET /telemetry/summary`: Aggregated breakdown of requests, routes, providers, tokens, and hardware measurements.
+* `GET /telemetry/summary`: Aggregated breakdown of requests, routes, providers, tokens, physical measurements, and system capabilities.
 * `POST /telemetry/clear`: Clear the in-memory telemetry buffer.
 

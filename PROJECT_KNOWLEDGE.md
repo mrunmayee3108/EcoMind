@@ -38,7 +38,8 @@ Similarly, for **"convert 100 km to miles"**:
 | **Phase 2** | Tools + Provider Layer | Completed | **Yes** | AST `Calculator`, `ToolRegistry`, `ModelProvider`, `GeminiProvider`, `LocalProvider`, `ModelProfile` catalog, 20 unit/API tests |
 | **Phase 3** | Tool Expansion + Provider-Agnostic Routing | Completed | **Yes** | 5 deterministic tools, `ToolRegistry`, `QueryAnalyzer`, `RoutingPolicy`, `GroqProvider`, `ModelDispatcher`, live `/chat` integration, 75 tests |
 | **Phase 4** | Semantic Cache & Lifecycle Controls | Completed | **Yes** | SentenceTransformers (`all-MiniLM-L6-v2`), FAISS vector index, SQLite metadata store, LRU & TTL eviction, Stage 2 conservative `CompatibilityChecker`, 97 tests |
-| **Phase 5** | Environmental Estimator | Planned | **No** | Energy (Wh), water (mL), and carbon (gCO2e) peer-reviewed models |
+| **Phase 5A** | Hardware-Agnostic Telemetry & Measurement | Completed | **Yes** | Generic `MeasurementProvider` abstraction (`NvidiaNvmlProvider`, `AndroidEnergyProvider`, `AppleEnergyProvider`, `UnavailableProvider`), explicit scopes, capabilities API, 117 tests |
+| **Phase 5B** | Environmental Estimator | Planned | **No** | Energy (Wh), water (mL), and carbon (gCO2e) peer-reviewed models for cloud providers |
 | **Phase 6** | Multi-Objective Optimizer | Planned | **No** | Normalized Pareto cost optimization over quality, latency, carbon, cost |
 | **Phase 7** | Eco Receipt | Planned | **No** | Itemized environmental invoice for each inference request |
 | **Phase 8** | Sustainability Dashboard | Planned | **No** | Long-term analytics, carbon-avoidance visualization |
@@ -54,7 +55,7 @@ Similarly, for **"convert 100 km to miles"**:
 backend/
 ├── main.py                     # FastAPI entry point, CORS, mounts routes_chat
 ├── api/
-│   ├── routes_chat.py          # /chat, /tools, /models, /cache endpoints with live routing
+│   ├── routes_chat.py          # /chat, /tools, /models, /cache, /telemetry endpoints with live routing
 │   └── schemas.py              # Pydantic v2 schemas (ChatRequest, ChatResponse, TokenUsageSchema, CacheStatsSchema)
 ├── cache/
 │   ├── semantic_cache.py       # High-level SemanticCache controller with two-stage lookup & storage
@@ -76,12 +77,18 @@ backend/
 │   ├── provider.py             # Abstract ModelProvider, ProviderResponse, TokenUsage
 │   ├── groq_provider.py        # Groq LPU provider using official Groq SDK with usage tracking
 │   ├── gemini_provider.py      # Google GenAI SDK wrapper with authentic token tracking
-│   ├── local_provider.py       # Ollama integration with local offline dev fallback
+│   ├── local_provider.py       # Ollama integration with generic measurement provider sampling
 │   ├── dispatcher.py           # Provider-agnostic ModelDispatcher for logical tiers
 │   └── model_profiles.py       # Model catalog across small, medium, and large tiers
+├── telemetry/
+│   ├── __init__.py             # Module exports
+│   ├── schemas.py              # ProvenanceStatus, MeasurementScope, MeasurementCapabilities, PhysicalMeasurement, GpuTelemetry, EnvironmentalTelemetry, TelemetryRecord, TelemetrySummary
+│   ├── measurement.py          # Generic MeasurementProvider ABC, NvidiaNvmlProvider, AndroidEnergyProvider, AppleEnergyProvider, UnavailableProvider
+│   ├── gpu.py                  # Low-level NVML ctypes C-binding, nvidia-smi fallback, GpuEnergyMonitor backward compatibility
+│   └── telemetry.py            # Central thread-safe TelemetryCollector decoupled from specific hardware
 ├── config/
 │   └── settings.py             # Pydantic BaseSettings loading from .env
-└── tests/                      # 92 passing unit & integration tests
+└── tests/                      # 117 passing unit & integration tests
     ├── test_calculator.py          # Calculator arithmetic & security tests
     ├── test_unit_converter.py      # UnitConverter conversions, dimensions & edge cases
     ├── test_datetime_calculator.py  # DateTimeCalculator differences, offsets, weekdays
@@ -93,15 +100,16 @@ backend/
     ├── test_dispatcher.py          # ModelDispatcher tier resolution & failure tests
     ├── test_models.py              # Model profiles & LocalProvider tests
     ├── test_api.py                 # FastAPI end-to-end integration tests (/chat, /tools, /models)
-    └── test_semantic_cache.py      # Comprehensive Phase 4 semantic cache & regression tests (16 tests)
+    ├── test_semantic_cache.py      # Comprehensive Phase 4 semantic cache & regression tests (16 tests)
+    └── test_telemetry.py           # Comprehensive Phase 5A measurement architecture tests (15 tests)
 frontend/
-├── src/App.tsx                 # Interactive Control Plane console with Phase 4 cache telemetry UI
+├── src/App.tsx                 # Interactive Control Plane console with Phase 4 cache & telemetry UI
 └── package.json                # React 19, Vite, Tailwind CSS v4, Lucide React
 ```
 
 ---
 
-## 5. Phase Summaries (0, 1, 2, 3, and 4)
+## 5. Phase Summaries (0, 1, 2, 3, 4, and 5A)
 
 ### Phase 0: Planning & Integrity
 - Defined the multi-objective optimization goal:
@@ -130,30 +138,37 @@ frontend/
 
 ### Phase 4: Accuracy-First Semantic Cache (Completed & Live Integrated)
 1. **Core Accuracy & Precision Mandate**:
-   - **"The semantic cache is designed to prefer cache misses over potentially incorrect cache hits."**
+   - "The semantic cache is designed to prefer cache misses over potentially incorrect cache hits."
    - Precision > Hit Rate. Semantic similarity alone is NOT sufficient for cache reuse.
-   - We do NOT claim that caching guarantees zero accuracy loss; rather, the architecture allows empirical measurement of accuracy degradation vs model inference avoidance.
 2. **Two-Stage Validation Pipeline**:
-   - **Stage 1 (Semantic Retrieval)**: Computes L2-normalized query embeddings via SentenceTransformers (`all-MiniLM-L6-v2`) and performs exact inner-product (cosine) search using FAISS `IndexFlatIP`. If similarity is below configurable `CACHE_SIMILARITY_THRESHOLD` (default 0.90), it is an immediate CACHE MISS.
-   - **Stage 2 (Compatibility Validation)**: Conservative deterministic validation via `CompatibilityChecker`:
-     - *Freshness / Dynamic check*: Rejects time-sensitive queries (e.g., "current price", "today", "now") to prevent stale answers.
-     - *Temporal & Numerical check*: Rejects queries that introduce specific years or numbers absent from the cached query (e.g., "in 1800").
-     - *Scoping & Constraint check*: Rejects queries that add scoping qualifiers (e.g., "specifically for high-latency networks", "in terms of scalability").
-     - *Entity / Concept check*: Rejects queries targeting different domain entities or concepts (e.g., "decorators" vs "generators").
-     - *Reasoning Depth check*: Rejects queries requiring deep mathematical derivation when cached entry was high-level/basic.
-3. **Execution Precedence**:
-   - Deterministic tools execute FIRST. Queries matching tools (e.g. `calculate 25 times 100`) bypass cache search and model inference completely (0 tokens, 0 cache overhead).
-4. **Cache Hit Safety**:
-   - On CACHE HIT, stored answer is returned strictly as-is with 0 model calls, 0 tokens, and `large_model_avoided=True`.
-5. **Persistence & Storage**:
-   - Metadata persisted in SQLite (`semantic_cache.db`), vectors persisted in FAISS (`semantic_cache.index`).
-6. **Lifecycle & Safe Eviction**:
-   - Configurable limits: `MAX_CACHE_ENTRIES` (default 1000) and `CACHE_TTL_DAYS` (default 30).
-   - Safe two-tier eviction: TTL expired entries are evicted first, followed by Least-Recently-Used (LRU, ordered by `last_used_at ASC, hit_count ASC, id ASC`).
-   - SQLite and FAISS are kept in sync; vectors are removed via `remove_ids`.
-7. **Telemetry & Endpoints**:
-   - Telemetry reports `cache_status` (`not_checked`, `miss`, `hit`), `cache_similarity`, `cache_hits`, `cache_misses`, `storage_size_bytes`, `storage_size_kb`.
-   - Admin/inspection endpoints: `GET /cache/stats` and `POST /cache/clear`.
+   - Stage 1: Cosine similarity retrieval via FAISS `IndexFlatIP` and SentenceTransformers (`all-MiniLM-L6-v2`).
+   - Stage 2: Conservative deterministic validation across freshness, temporal/numerical modifiers, scoping constraints, entities, and reasoning depth.
+3. **Execution Precedence**: Deterministic tools execute FIRST (0 tokens, 0 cache overhead).
+4. **Lifecycle & Persistence**: SQLite metadata store + FAISS vector index; TTL + LRU safe eviction.
+
+### Phase 5A: Hardware-Agnostic Telemetry & Measurement Architecture (Completed & Live Integrated)
+1. **Core Philosophy & Developer Note**:
+   > "EcoMind is measurement-capability aware. Physical energy is reported only when a trustworthy measurement source is available. The absence of a measurement is represented explicitly rather than replaced with a fabricated estimate."
+2. **Generic Measurement Interface**:
+   - `MeasurementProvider` abstract base interface.
+   - `NvidiaNvmlProvider`: Live GPU power/energy sampling via direct NVML ctypes C-binding with `nvidia-smi` fallback. Labeled: `"MEASURED GPU ENERGY (INFERENCE WINDOW ONLY - NOT TOTAL SYSTEM ENERGY)"`.
+   - `AndroidEnergyProvider`: Ingestion interface and architectural contract for future native Android client device telemetry; returns `UNAVAILABLE` without remote client transmission.
+   - `AppleEnergyProvider`: Architectural interface for Apple Silicon / iOS client telemetry; returns `UNAVAILABLE` when unsupplied.
+   - `UnavailableProvider`: Safe fallback when no hardware sensor is available.
+3. **Explicit Non-Conflated Scopes**:
+   - `GPU_INFERENCE_WINDOW`: On-device GPU die & VRAM power draw during inference window only.
+   - `DEVICE`: Whole-device battery/power rail consumption on client hardware.
+   - `SYSTEM`: Full server/host power consumption (CPU, RAM, motherboard, storage, PSU losses).
+   - `CLOUD_INFERENCE`: Cloud API execution where hardware power is inaccessible.
+   - `UNKNOWN`: Fallback or unspecified measurement boundary.
+4. **Strict Provenance**:
+   - `MEASURED`: Physical hardware sensors, high-resolution timers, deterministic tools (0 tokens), cache hits (0 tokens).
+   - `PROVIDER_REPORTED`: Authentic vendor API token counts and client-transmitted payloads.
+   - `UNAVAILABLE`: Absent physical measurements, cloud provider energy, failed requests.
+   - Zero fabrication: `ESTIMATED` is not used in Phase 5A.
+5. **System Capability Introspection**:
+   - Exposes `GET /telemetry/capabilities` (`gpu_energy`, `system_energy`, `device_energy`, `provider_energy`).
+   - Graceful degradation: uses best real measurement source available, returns `null` + `UNAVAILABLE` otherwise, never substitutes fake estimates.
 
 ---
 
@@ -167,21 +182,27 @@ frontend/
 - Instantly compute word count, character count, sentence count, and frequency distributions over text with **0 tokens** and **0 LLM calls**.
 - Prioritize deterministic tools before cache lookup or model routing.
 - Conservatively reuse previous model answers via two-stage Semantic Cache for equivalent queries with **0 tokens** and **0 model calls**.
-- Reject false cache hits when queries add constraints (e.g. high-latency networks), temporal modifiers (e.g. in 1800), different entities (generators vs decorators), or require deeper mathematical reasoning.
+- Reject false cache hits when queries add constraints, temporal modifiers, different entities, or require deeper reasoning.
 - Prevent caching of dynamic or time-sensitive queries to eliminate stale answer risks.
 - Classify queries into 7 task categories via `QueryAnalyzer` and route to deterministic tools or logical model tiers (`small`, `medium`, `large`) via `RoutingPolicy`.
 - Dynamically resolve logical tiers to configured providers (`GroqProvider`, `GeminiProvider`, `LocalProvider` / Ollama) via `ModelDispatcher`.
 - Extract and display authentic token counts, measured latency, and cache telemetry in the React frontend.
+- Measure live physical GPU energy on NVIDIA hardware via NVML during local inference windows with explicit limitation labeling.
+- Decouple telemetry collection from vendor-specific code via generic `MeasurementProvider` abstraction.
+- Enforce explicit measurement scopes (`GPU_INFERENCE_WINDOW`, `DEVICE`, `SYSTEM`, `CLOUD_INFERENCE`, `UNKNOWN`) so energy measurements are never ambiguously conflated.
+- Introspect physical measurement capabilities via `GET /telemetry/capabilities`.
+- Ingest client device telemetry via `AndroidEnergyProvider` and `AppleEnergyProvider` interfaces without pretending the backend accesses remote phones directly.
 - Support manual execution path directives (`auto`, `deterministic_tool`, `semantic_cache`, `small_model`, `medium_model`, `large_model`).
-- Introspect registered tools (`GET /tools`), model profiles (`GET /models`), and cache statistics (`GET /cache/stats`).
+- Introspect registered tools (`GET /tools`), model profiles (`GET /models`), cache statistics (`GET /cache/stats`), and telemetry (`GET /telemetry/summary`, `GET /telemetry/recent`, `GET /telemetry/capabilities`).
 
 ### What It CANNOT Do Yet (Future Phases)
-- Estimate energy, water, and carbon metrics (Phase 5).
+- Estimate energy, water, and carbon metrics for cloud providers (Phase 5B).
 - Run automated multi-objective Pareto optimization (Phase 6).
 - Generate itemized Eco Receipts (Phase 7).
 
 ---
 
-## 7. Why Phase 5 Is Next
+## 7. Why Phase 5B Is Next
 
-With deterministic tools (Phase 3) and an accuracy-first semantic cache (Phase 4) fully in place, the system has multiple execution paths: Deterministic Tools (0 tokens), Semantic Cache (0 tokens), Small Model, Medium Model, and Large Model. To enable intelligent multi-objective optimization (Phase 6), the system next requires scientific, peer-reviewed estimation models for **Energy (Wh), Water Cooling (mL), and Carbon (gCO2e)** based on hardware profiles and authentic token telemetry (Phase 5).
+With deterministic tools (Phase 3), accuracy-first semantic cache (Phase 4), and a hardware-agnostic physical measurement architecture (Phase 5A) fully in place, the system authenticates physical measurements on local hardware while marking cloud physical energy as `UNAVAILABLE`. To enable intelligent multi-objective optimization (Phase 6) across cloud providers (Groq, Google Gemini) where physical hardware is unmeasurable, the system next requires scientific, peer-reviewed estimation models for **Energy (Wh), Water Cooling (mL), and Carbon (gCO2e)** based on hardware profiles and authentic token telemetry (Phase 5B).
+

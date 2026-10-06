@@ -109,98 +109,29 @@ class GpuEnergyMonitor:
     This measurement captures GPU-only power. It is explicitly labeled as
     MEASURED GPU ENERGY and does NOT represent total system power (which includes
     CPU, DRAM, motherboard, storage, cooling fans, and PSU conversion losses).
+
+    Refactored to delegate to generic NvidiaNvmlProvider for architecture consistency.
     """
 
     def __init__(self, sample_interval_ms: float = 20.0):
-        self.sample_interval = sample_interval_ms / 1000.0
-        self._device = NVMLDevice()
-        self._is_active: bool = False
-        self._stop_event = threading.Event()
-        self._sample_thread: Optional[threading.Thread] = None
-        self._samples: List[float] = []
-        self._start_time: Optional[float] = None
-        self._end_time: Optional[float] = None
-        self._duration_ms: Optional[float] = None
-        self._device_name: Optional[str] = self._device.get_device_name()
+        from .measurement import NvidiaNvmlProvider
+        self._provider = NvidiaNvmlProvider(sample_interval_ms=sample_interval_ms)
 
     @property
     def is_hardware_available(self) -> bool:
-        return self._device.available or FallbackNvidiaSmi.is_available()
-
-    def _sample_loop(self):
-        while not self._stop_event.is_set():
-            p = self._device.get_power_watts()
-            if p is not None:
-                self._samples.append(p)
-            self._stop_event.wait(self.sample_interval)
+        return self._provider.is_available()
 
     def start(self):
         """Begin sampling GPU power during the inference window."""
-        self._samples.clear()
-        self._stop_event.clear()
-        self._start_time = time.perf_counter()
-        self._is_active = True
-
-        if self._device.available:
-            # High-frequency background sampling thread
-            self._sample_thread = threading.Thread(target=self._sample_loop, daemon=True)
-            self._sample_thread.start()
-        elif FallbackNvidiaSmi.is_available():
-            p, name = FallbackNvidiaSmi.get_power_and_name()
-            if p is not None:
-                self._samples.append(p)
-            if name and not self._device_name:
-                self._device_name = name
+        self._provider.start_measurement()
 
     def stop(self):
         """Stop sampling and finalize measurement metrics."""
-        if not self._is_active:
-            return
-        self._end_time = time.perf_counter()
-        self._is_active = False
-        self._stop_event.set()
-
-        if self._sample_thread is not None and self._sample_thread.is_alive():
-            self._sample_thread.join(timeout=0.2)
-
-        if self._start_time is not None and self._end_time is not None:
-            self._duration_ms = (self._end_time - self._start_time) * 1000.0
-
-        # One final sample if thread captured nothing or for single-point validation
-        if self._device.available and not self._samples:
-            p = self._device.get_power_watts()
-            if p is not None:
-                self._samples.append(p)
+        self._provider.stop_measurement()
 
     def get_telemetry(self) -> GpuTelemetry:
         """Produce standardized GpuTelemetry model."""
-        if not self.is_hardware_available or not self._samples:
-            return GpuTelemetry(
-                device_name=self._device_name,
-                average_power_watts=None,
-                peak_power_watts=None,
-                energy_joules=None,
-                sample_count=0,
-                measurement_duration_ms=self._duration_ms,
-                provenance=ProvenanceStatus.UNAVAILABLE,
-                label="MEASURED GPU ENERGY (INFERENCE WINDOW ONLY - NOT TOTAL SYSTEM ENERGY)"
-            )
-
-        avg_power = sum(self._samples) / len(self._samples)
-        peak_power = max(self._samples)
-        duration_sec = (self._duration_ms or 0.0) / 1000.0
-        energy_joules = avg_power * duration_sec
-
-        return GpuTelemetry(
-            device_name=self._device_name or "NVIDIA GPU",
-            average_power_watts=round(avg_power, 4),
-            peak_power_watts=round(peak_power, 4),
-            energy_joules=round(energy_joules, 6),
-            sample_count=len(self._samples),
-            measurement_duration_ms=round(self._duration_ms or 0.0, 2),
-            provenance=ProvenanceStatus.MEASURED,
-            label="MEASURED GPU ENERGY (INFERENCE WINDOW ONLY - NOT TOTAL SYSTEM ENERGY)"
-        )
+        return self._provider.to_gpu_telemetry()
 
     def __enter__(self):
         self.start()
@@ -208,3 +139,4 @@ class GpuEnergyMonitor:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
+
