@@ -136,6 +136,14 @@ npm run dev
   - Preserved authentic on-device NVIDIA GPU power/energy sampling via direct NVML ctypes C-binding with `nvidia-smi` fallback and explicit limitation labeling.
   - Implemented architectural ingestion contracts for future native mobile clients (Android / Apple) without pretending the Python server directly reads remote phone hardware.
   - Added system capabilities introspection (`GET /telemetry/capabilities`) with graceful degradation: uses best real measurement source available, returns `null` + `UNAVAILABLE` otherwise, and never substitutes synthetic estimates.
+- **Phase 5B — Environmental Accounting & Savings Integrity**: Completed (129 tests passing, as reported by the test run).
+- Implemented strict environmental accounting: cloud energy, water, and carbon remain `UNAVAILABLE` when reliable per-request measurements are not available.
+- Added local NVIDIA GPU operational carbon calculation when a valid grid-intensity factor is configured, using measured GPU inference-window energy.
+- Preserved explicit measurement scope and provenance so measured values, estimates, and unavailable metrics are not confused.
+- Added tool/cache avoidance telemetry for model calls, tokens, and latency without assuming zero physical energy consumption.
+- Implemented pairwise savings comparison for energy, water, and carbon, returning `UNAVAILABLE` when either side lacks a valid metric; token, call, and latency differences are tracked separately.
+- Added `POST /telemetry/savings/compare` and supporting schemas, tests, and documentation.
+- Documented limitations: cloud physical energy and water, full-system energy, and embodied carbon are not estimated without defensible data.
 
 ### End-to-End Execution & Telemetry Flow
 ```text
