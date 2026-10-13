@@ -1,6 +1,13 @@
 from .schemas import (
     ProvenanceStatus,
     MeasurementScope,
+    ComparisonType,
+    SourceType,
+    SourceValidationStatus,
+    WaterCategory,
+    EnvironmentalSource,
+    SourceCheckResult,
+    GridIntensityRecord,
     MeasurementCapabilities,
     PhysicalMeasurement,
     TokenTelemetry,
@@ -23,12 +30,34 @@ from .measurement import (
     get_default_measurement_provider,
     get_system_measurement_capabilities,
 )
+from .registry import (
+    SourceRegistry,
+    SourceValidationService,
+    source_registry,
+    source_validation_service,
+)
+from .grid import GridIntensityManager, grid_manager
+from .water import WaterAccountingEngine, water_accounting_engine
+from .cloud_estimator import (
+    CloudEnergyEstimator,
+    MLEnergyEstimator,
+    EcoLogitsEstimator,
+    CompositeCloudEstimator,
+    cloud_energy_estimator,
+)
 from .telemetry import TelemetryCollector, telemetry_collector
 from .savings import calculate_savings
 
 __all__ = [
     "ProvenanceStatus",
     "MeasurementScope",
+    "ComparisonType",
+    "SourceType",
+    "SourceValidationStatus",
+    "WaterCategory",
+    "EnvironmentalSource",
+    "SourceCheckResult",
+    "GridIntensityRecord",
     "MeasurementCapabilities",
     "PhysicalMeasurement",
     "TokenTelemetry",
@@ -50,6 +79,19 @@ __all__ = [
     "UnavailableProvider",
     "get_default_measurement_provider",
     "get_system_measurement_capabilities",
+    "SourceRegistry",
+    "SourceValidationService",
+    "source_registry",
+    "source_validation_service",
+    "GridIntensityManager",
+    "grid_manager",
+    "WaterAccountingEngine",
+    "water_accounting_engine",
+    "CloudEnergyEstimator",
+    "MLEnergyEstimator",
+    "EcoLogitsEstimator",
+    "CompositeCloudEstimator",
+    "cloud_energy_estimator",
     "TelemetryCollector",
     "telemetry_collector",
     "calculate_savings",

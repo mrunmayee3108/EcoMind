@@ -299,3 +299,75 @@ Before proceeding to implement Phase 5B in code, please review and approve the f
 * **Removed silent US grid average assumption**: Prohibited assuming cloud data centers run on the US national grid average. Cloud carbon marked `UNAVAILABLE` unless geographic location is authenticated.
 * **Reassessed OpenAI and Anthropic claims**: Classified Sam Altman's 0.34 Wh / 0.32 mL quote as an unverified executive remark, not an API estimation model. Documented Anthropic's complete corporate disclosure opacity.
 * **Formalized the Pair-Wise Non-Zero Rule**: Established that if either side of a comparison is `UNAVAILABLE`, the environmental differential $\Delta$ is strictly `UNAVAILABLE`.
+
+---
+
+## 10. Phase 5B Upgrade: Fresh, Evidence-Based Environmental Accounting & Auditable Estimator Architecture
+
+The Phase 5B Upgrade extends EcoMind's accounting engine with a versioned scientific registry, pluggable cloud estimation adapters, active grid intensity management, rigorous water categorizations, and comparison reliability classifications.
+
+### 10.1 Versioned Environmental Source Registry (`telemetry/registry.py`)
+To make all calculations reproducible, auditable, and resistant to unverified methodology drift, EcoMind introduces a versioned registry:
+- **Registry Schema (`EnvironmentalSource`)**: Captures `source_id`, `name`, `url`, `publisher`, `source_type`, `publication_date`, `retrieval_date`, `last_verified_timestamp`, `applicable_providers`, `applicable_models`, `applicable_hardware`, `supported_metrics`, `formula`, `coefficients`, `units`, `assumptions`, `measurement_scope`, `uncertainty_limitations`, `version`, `validation_status`, `next_review_date`, `attribution`, and `content_hash`.
+- **Pre-Loaded Sources**:
+  1. `src-nvml-nvidia-2024`: NVIDIA Management Library (NVML) Hardware Telemetry (C-API, `GPU_INFERENCE_WINDOW`).
+  2. `src-mlenergy-leaderboard-v3`: ML.ENERGY Benchmark Dataset v3.0 (SymbioticLab / Univ of Michigan, arXiv:2310.03003, `SYSTEM` scope).
+  3. `src-ecologits-lca-2024`: EcoLogits LLM API Life Cycle Assessment (MLCO2 / Data for Good, `CLOUD_INFERENCE` scope).
+  4. `src-google-elsworth-2025`: Google Gemini Apps Fleet Environmental Benchmark (Elsworth et al., arXiv:2508.15734).
+  5. `src-ember-climate-2024`: Ember Global Electricity Carbon Intensity Database (2024).
+  6. `src-electricitymaps-v3`: Electricity Maps Real-Time Grid Carbon Intensity API.
+  7. `src-groq-isca-2020`: Groq TSP Architecture Specification (Abts et al., IEEE/ACM ISCA 2020).
+- **Source Freshness Management (`SourceValidationService`)**:
+  - Automatically audits source age against configurable policies (`SOURCE_STALE_THRESHOLD_DAYS=90`, `SOURCE_REVIEW_NEEDED_DAYS=30`).
+  - Flags sources as `CURRENT`, `REVIEW_NEEDED`, `STALE`, or `UNAVAILABLE`.
+  - **Graceful Fallback**: If an upstream URL or API endpoint is unreachable, EcoMind retains the previously validated methodology without crashing inference requests.
+  - Webpage changes require schema validation and review before activating new coefficients.
+
+### 10.2 Pluggable Cloud Energy Estimation (`telemetry/cloud_estimator.py`)
+Rather than forcing cloud physical energy to remain permanently inaccessible, EcoMind implements a pluggable `CloudEnergyEstimator` layer based on verified evidence:
+- **ML.ENERGY Empirical Adapter (`MLEnergyEstimator`)**:
+  - Applies empirical testbed measurements conducted on dedicated NVIDIA H100 SXM5 / A100 nodes under vLLM for open-weight model architectures (`openai/gpt-oss-20b`, `openai/gpt-oss-120b`, `qwen/qwen3.8-27b`, `llama-3.1-8b`, `llama-3.3-70b`).
+  - Formula:
+    $$E_{\text{inference}} = E_{\text{prefill\_per\_token}} \times N_{\text{in}} + E_{\text{decode\_per\_token}} \times N_{\text{out}} + E_{\text{baseline\_req}}$$
+    $$E_{\text{kwh}} = E_{\text{inference}} / 3{,}600{,}000$$
+  - Scope: `SYSTEM`. Provenance: `ESTIMATED`.
+- **EcoLogits LCA Adapter (`EcoLogitsEstimator`)**:
+  - Implements bottom-up Life Cycle Assessment (ISO 14044) multiplying active generation time ($TTFT + N_{\text{out}} / TPS$) by server power draw, PUE ($1.18$), and embodied hardware manufacturing overhead ($+15\%$).
+  - Scope: `CLOUD_INFERENCE`. Provenance: `ESTIMATED`.
+- **Integrity Safeguards**:
+  - Output is strictly labeled `ESTIMATED` (never `MEASURED`).
+  - Point estimates explicitly state that confidence intervals are unknown (unreported by upstream literature); no synthetic intervals are fabricated.
+  - Closed-source or uncharacterized models (e.g. Google Gemini API checkpoints with undisclosed architecture) return `None`, preserving `UNAVAILABLE` status with explicit reasons.
+  - Entire capability is optional via `ENABLE_CLOUD_ENERGY_ESTIMATION` (default `False` preserving strict physical baseline).
+
+### 10.3 Grid Carbon Intensity Management (`telemetry/grid.py`)
+- **Unit Conversion Formula**:
+  $$E_{\text{kwh}} = \frac{E_{\text{joules}}}{3{,}600{,}000}$$
+  $$C_{\text{gCO2e}} = E_{\text{kwh}} \times I_{\text{grid}}$$
+- **Provenance Rules**:
+  - Static configured factor (`LOCAL_GRID_INTENSITY_GCO2E_PER_KWH` in settings) is marked `is_live=False` and attributed to user configuration.
+  - Dynamic providers (`ENABLE_DYNAMIC_GRID_INTENSITY=True`) fetch live regional data (`is_live=True`). If upstream dynamic providers fail, EcoMind falls back to static verified regional factors (Ember 2024) with explicit `fallback_used=True` disclosure and never claims "live".
+  - **Non-Substitution Guarantee**: EcoMind never silently substitutes an arbitrary national or global factor when an unconfigured local region is requested. If intensity is unconfigured, carbon remains `UNAVAILABLE`.
+  - Carbon scope remains strictly `MeasurementScope.GPU_BOARD_OPERATIONAL_CARBON` when derived from on-device GPU energy.
+
+### 10.4 Water Accounting Safeguards (`telemetry/water.py`)
+Distinguishes four distinct water impact categories:
+1. `direct_on_site_cooling`: direct evaporative cooling towers and adiabatic misting.
+2. `data_center_operational`: facility HVAC cooling and humidification.
+3. `indirect_electricity_water`: water consumed in thermoelectric or hydroelectric power generation at the regional utility.
+4. `lifecycle_water`: embodied water across hardware extraction, semiconductor fabrication, and transport.
+
+**Rules**:
+- Cloud providers publish zero per-request water disclosures, zero data center locations, and zero seasonal WUE data. Water is strictly marked `UNAVAILABLE` with an exact explanation of missing data.
+- Multiplying energy by an arbitrary water coefficient is prohibited.
+- Air-cooled local hardware has 0.0 direct on-site water, but indirect power-generation water is marked `UNAVAILABLE` without utility WIE data.
+
+### 10.5 Upgraded Pair-Wise Savings Engine (`telemetry/savings.py`)
+- **Comparison Classification (`ComparisonType`)**:
+  - `MEASURED_VS_MEASURED`: Both routes feature direct hardware sensor measurements in matching scope.
+  - `ESTIMATED_VS_ESTIMATED`: Both routes feature validated scientific estimates under comparable methodology.
+  - `MIXED_PROVENANCE`: Direct sensor measurement compared with modeled estimate. Explicit qualification notice is attached.
+  - `UNAVAILABLE`: One or both routes lack authentic measurement or estimate.
+- **The Non-Zero Rule**: If either route lacks data, savings value is `None` and status is `UNAVAILABLE`. Unmeasured metrics are never treated as zero.
+- **Quality Gate**: If `quality_threshold_met=False`, savings credit is disallowed and a quality degradation penalty is reported.
+

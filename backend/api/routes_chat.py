@@ -19,8 +19,18 @@ from models.model_profiles import list_all_profiles
 from models.provider import TokenUsage
 from cache.semantic_cache import semantic_cache
 from telemetry.telemetry import telemetry_collector
-from telemetry.schemas import TelemetryRecord, TelemetrySummary, MeasurementCapabilities, SavingsComparison
+from telemetry.schemas import (
+    TelemetryRecord,
+    TelemetrySummary,
+    MeasurementCapabilities,
+    SavingsComparison,
+    EnvironmentalSource,
+    SourceCheckResult,
+    GridIntensityRecord
+)
 from telemetry.savings import calculate_savings
+from telemetry.registry import source_registry, source_validation_service
+from telemetry.grid import grid_manager
 
 router = APIRouter()
 
@@ -379,4 +389,37 @@ def compare_telemetry_savings(request: SavingsCompareRequest):
         baseline=base,
         quality_threshold_met=request.quality_threshold_met
     )
+
+@router.get("/telemetry/sources", response_model=List[EnvironmentalSource])
+def list_environmental_sources():
+    """List all registered, versioned environmental estimation sources and their freshness status."""
+    return source_registry.list_all()
+
+@router.get("/telemetry/sources/{source_id}", response_model=EnvironmentalSource)
+def get_environmental_source(source_id: str):
+    """Retrieve detailed metadata and methodology for a specific environmental source."""
+    src = source_registry.get(source_id)
+    if not src:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Environmental estimation source '{source_id}' not found in registry."
+        )
+    return src
+
+@router.post("/telemetry/sources/refresh", response_model=List[SourceCheckResult])
+def refresh_environmental_sources():
+    """
+    Audit freshness across all registered sources and flag review-needed or stale methodologies.
+    Retains previous validated version if an external source is inaccessible.
+    """
+    return source_validation_service.refresh_all()
+
+@router.get("/telemetry/grid", response_model=Optional[GridIntensityRecord])
+def get_current_grid_intensity(region: Optional[str] = None):
+    """
+    Inspect the active electricity grid carbon emissions factor, applicable region,
+    provenance, and live vs static status.
+    """
+    return grid_manager.get_intensity(region=region)
+
 

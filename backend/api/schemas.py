@@ -14,7 +14,14 @@ class TokenUsageSchema(BaseModel):
     total_tokens: Optional[int] = None
     is_estimated: bool = False
 
-from telemetry.schemas import TelemetryRecord, TelemetrySummary, SavingsComparison
+from telemetry.schemas import (
+    TelemetryRecord,
+    TelemetrySummary,
+    SavingsComparison,
+    EnvironmentalSource,
+    SourceCheckResult,
+    GridIntensityRecord
+)
 
 class SavingsCompareRequest(BaseModel):
     selected_request_id: str = Field(..., description="Request ID of the executed route to evaluate")

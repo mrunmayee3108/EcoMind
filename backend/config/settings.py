@@ -33,6 +33,20 @@ class Settings(BaseSettings):
     # Local grid emissions factor in gCO2e per kWh (e.g. 370.0 for US national average, or region-specific factor).
     # If None or <= 0, local GPU operational carbon is reported as UNAVAILABLE without fabrication.
     LOCAL_GRID_INTENSITY_GCO2E_PER_KWH: Optional[float] = None
+    LOCAL_GRID_REGION: str = "DEFAULT"
+    ENABLE_DYNAMIC_GRID_INTENSITY: bool = False
+    GRID_INTENSITY_SOURCE_NAME: str = "ConfiguredStatic"
+
+    # Cloud Energy & Environmental Estimation Settings
+    # Optional estimator for cloud API calls (e.g. ML.ENERGY or EcoLogits).
+    # When False (default), cloud physical energy remains strictly UNAVAILABLE.
+    ENABLE_CLOUD_ENERGY_ESTIMATION: bool = False
+    CLOUD_ESTIMATOR_PREFERENCE: str = "composite"
+
+    # Source Freshness & Registry Settings
+    SOURCE_STALE_THRESHOLD_DAYS: int = 90
+    SOURCE_REVIEW_NEEDED_DAYS: int = 30
+    SOURCE_AUTO_CHECK_ON_STARTUP: bool = True
 
     # Semantic Cache Settings (Phase 4 Precision-First & Lifecycle Controls)
     CACHE_ENABLED: bool = True

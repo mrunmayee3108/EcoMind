@@ -29,6 +29,96 @@ class MeasurementScope(str, Enum):
     CLOUD_INFERENCE = "CLOUD_INFERENCE"
     UNKNOWN = "UNKNOWN"
 
+class ComparisonType(str, Enum):
+    """
+    Classification of pair-wise comparison reliability and provenance match.
+    - MEASURED_VS_MEASURED: Both routes feature direct hardware sensor measurements in matching scope.
+    - ESTIMATED_VS_ESTIMATED: Both routes feature validated scientific estimates under comparable methodology.
+    - MIXED_PROVENANCE: One route is directly measured while the other is an estimate (explicit qualification required).
+    - UNAVAILABLE: One or both routes lack authentic measurement or validated estimate for the metric.
+    """
+    MEASURED_VS_MEASURED = "MEASURED_VS_MEASURED"
+    ESTIMATED_VS_ESTIMATED = "ESTIMATED_VS_ESTIMATED"
+    MIXED_PROVENANCE = "MIXED_PROVENANCE"
+    UNAVAILABLE = "UNAVAILABLE"
+
+class SourceType(str, Enum):
+    """Classification of scientific or technical estimation sources."""
+    RESEARCH_PAPER = "research_paper"
+    OFFICIAL_DOCUMENTATION = "official_documentation"
+    BENCHMARK_DATASET = "benchmark_dataset"
+    API = "api"
+    CORPORATE_REPORT = "corporate_report"
+
+class SourceValidationStatus(str, Enum):
+    """Lifecycle and freshness validation status of an environmental estimation source."""
+    CURRENT = "current"
+    REVIEW_NEEDED = "review_needed"
+    STALE = "stale"
+    UNAVAILABLE = "unavailable"
+    SUPERSEDED = "superseded"
+
+class WaterCategory(str, Enum):
+    """Rigorous categories of water footprint impact."""
+    DIRECT_ON_SITE_COOLING = "direct_on_site_cooling"
+    DATA_CENTER_OPERATIONAL = "data_center_operational"
+    INDIRECT_ELECTRICITY_WATER = "indirect_electricity_water"
+    LIFECYCLE_WATER = "lifecycle_water"
+    UNAVAILABLE = "unavailable"
+
+class EnvironmentalSource(BaseModel):
+    """
+    Metadata and specification for a scientific or empirical environmental estimation source.
+    Supports complete reproducibility, auditability, and freshness tracking.
+    """
+    source_id: str = Field(..., description="Unique machine-readable source identifier")
+    name: str = Field(..., description="Human-readable title of the source or methodology")
+    url: str = Field(..., description="Canonical URL, DOI, or repository link")
+    publisher: str = Field(..., description="Publishing organization, institution, or authors")
+    source_type: SourceType = Field(..., description="Type of source")
+    publication_date: str = Field(..., description="Original publication date (YYYY-MM-DD)")
+    retrieval_date: str = Field(..., description="Date initially ingested into EcoMind (YYYY-MM-DD)")
+    last_verified_timestamp: str = Field(..., description="ISO-8601 UTC timestamp of last verification check")
+    applicable_providers: List[str] = Field(default_factory=list, description="Providers where source applies")
+    applicable_models: List[str] = Field(default_factory=list, description="Specific models supported")
+    applicable_hardware: List[str] = Field(default_factory=list, description="Hardware testbeds/architectures")
+    applicable_regions: List[str] = Field(default_factory=list, description="Geographical regions applicable")
+    supported_metrics: List[str] = Field(default_factory=list, description="Metrics supported (energy, carbon, water, etc.)")
+    formula: Optional[str] = Field(default=None, description="Mathematical formulation or equation description")
+    coefficients: Dict[str, Any] = Field(default_factory=dict, description="Verified scientific coefficients")
+    units: Dict[str, str] = Field(default_factory=dict, description="Measurement units for outputs and inputs")
+    assumptions: List[str] = Field(default_factory=list, description="Core assumptions and boundary conditions")
+    measurement_scope: MeasurementScope = Field(default=MeasurementScope.UNKNOWN, description="Boundary scope")
+    uncertainty_limitations: str = Field(default="", description="Known limitations, confidence bounds, or caveats")
+    version: str = Field(default="1.0.0", description="Methodology / source version string")
+    validation_status: SourceValidationStatus = Field(default=SourceValidationStatus.CURRENT, description="Freshness status")
+    next_review_date: str = Field(default="", description="Next scheduled review date (YYYY-MM-DD)")
+    attribution: str = Field(default="", description="Formal academic citation or technical attribution")
+    etag: Optional[str] = Field(default=None, description="HTTP ETag or checksum if available")
+    content_hash: Optional[str] = Field(default=None, description="Cryptographic content hash for tamper detection")
+
+class SourceCheckResult(BaseModel):
+    """Result of an automated or manual freshness/validation check on a source."""
+    source_id: str
+    status: SourceValidationStatus
+    last_checked: str
+    is_accessible: bool
+    needs_review: bool
+    message: str
+
+class GridIntensityRecord(BaseModel):
+    """Timestamped electricity grid emissions intensity record."""
+    source_name: str = Field(..., description="Name of reporting organization or provider")
+    region_code: str = Field(..., description="ISO or utility region code (e.g. US-CA, IN, DE, DEFAULT)")
+    intensity_gco2e_per_kwh: float = Field(..., description="Operational emissions intensity in gCO2e per kWh")
+    retrieval_timestamp: str = Field(..., description="ISO-8601 UTC timestamp of retrieval")
+    applicable_timestamp: str = Field(..., description="ISO-8601 UTC timestamp representing time of grid measurement")
+    units: str = Field(default="gCO2e/kWh", description="Units of measurement")
+    is_live: bool = Field(default=False, description="True if fetched from live dynamic source; False if static configured")
+    version: str = Field(default="1.0.0", description="Data version")
+    fallback_used: bool = Field(default=False, description="True if a fallback factor was applied due to upstream failure")
+    attribution: str = Field(default="", description="Citation or attribution for grid intensity")
+
 class MeasurementCapabilities(BaseModel):
     """
     Capability response structure defining which physical measurement sources
@@ -182,8 +272,40 @@ class EnvironmentalTelemetry(BaseModel):
         default_factory=MeasurementCapabilities,
         description="Capability response indicating which measurement sources are supported"
     )
+    source_id: Optional[str] = Field(
+        default=None,
+        description="Identifier of the scientific source registry entry used for estimation"
+    )
+    source_version: Optional[str] = Field(
+        default=None,
+        description="Version string of the underlying estimation source/methodology"
+    )
+    estimator_name: Optional[str] = Field(
+        default=None,
+        description="Name of the estimation adapter (e.g. MLEnergyEstimator, EcoLogitsEstimator)"
+    )
+    estimator_version: Optional[str] = Field(
+        default=None,
+        description="Version of the estimator adapter code"
+    )
+    data_freshness_status: Optional[str] = Field(
+        default=None,
+        description="Validation status of the source (e.g. CURRENT, REVIEW_NEEDED, STALE)"
+    )
+    assumptions: List[str] = Field(
+        default_factory=list,
+        description="Explicit technical assumptions underpinning estimated numbers"
+    )
+    uncertainty_info: Optional[str] = Field(
+        default=None,
+        description="Documented uncertainty or confidence limitations from published source"
+    )
+    unavailable_reasons: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Human-readable explanation of why specific metrics are UNAVAILABLE"
+    )
     note: str = Field(
-        default="Physical environmental data is UNAVAILABLE for cloud APIs (zero fabrication). Local GPU energy is populated only when measured on-device.",
+        default="Physical environmental data is UNAVAILABLE for cloud APIs without verified estimators. Local GPU energy is populated only when measured on-device.",
         description="Integrity disclosure"
     )
 
@@ -210,6 +332,8 @@ class MetricSavings(BaseModel):
     unit: str = Field(default="", description="Unit of measurement (J, Wh, mL, gCO2e, etc.)")
     provenance: ProvenanceStatus = Field(default=ProvenanceStatus.UNAVAILABLE, description="Authentic provenance of savings")
     scope: Optional[MeasurementScope] = Field(default=None, description="Measurement scope if both routes share identical scope")
+    comparison_type: Optional[ComparisonType] = Field(default=None, description="Comparison category: MEASURED_VS_MEASURED, ESTIMATED_VS_ESTIMATED, MIXED_PROVENANCE, UNAVAILABLE")
+    uncertainty_info: Optional[str] = Field(default=None, description="Uncertainty limitations for the computed savings")
     note: str = Field(default="", description="Integrity note explaining calculation or why unavailable")
 
 class SavingsComparison(BaseModel):
@@ -220,6 +344,10 @@ class SavingsComparison(BaseModel):
     selected_route: str = Field(..., description="Route selected and executed")
     baseline_route: str = Field(..., description="Explicit baseline route (e.g. large_model)")
     quality_threshold_met: bool = Field(default=True, description="Whether the selected route met required quality")
+    comparison_type: Optional[ComparisonType] = Field(default=None, description="Overall comparison type: MEASURED_VS_MEASURED, ESTIMATED_VS_ESTIMATED, MIXED_PROVENANCE, UNAVAILABLE")
+    baseline_estimator: Optional[str] = Field(default=None, description="Estimator/source used for baseline route")
+    selected_estimator: Optional[str] = Field(default=None, description="Estimator/source used for selected route")
+    limitations: List[str] = Field(default_factory=list, description="Methodological caveats and uncertainty limitations")
     
     # Operational Fact Proxies
     model_calls_avoided: int = Field(default=0, description="Model inference calls avoided (1 for tools/cache, 0 for models)")

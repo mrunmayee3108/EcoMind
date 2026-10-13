@@ -21,6 +21,10 @@ from .measurement import (
     MeasurementProvider,
     get_system_measurement_capabilities,
 )
+from .grid import grid_manager
+from .water import water_accounting_engine
+from .cloud_estimator import cloud_energy_estimator
+from .registry import source_registry, source_validation_service
 from config.settings import settings
 from models.provider import TokenUsage
 
@@ -70,7 +74,10 @@ class TelemetryCollector:
         env = self._resolve_environmental_telemetry(
             provider=provider,
             physical_measurement=physical_measurement,
-            gpu_telemetry=gpu_telemetry
+            gpu_telemetry=gpu_telemetry,
+            model=model,
+            tokens=tokens,
+            inference_latency_ms=inference_latency_ms
         )
 
         # 4. Model Call & Token Avoidance Telemetry (Phase 5B)
@@ -150,6 +157,7 @@ class TelemetryCollector:
                     details={"error": str(error_message)}
                 ),
                 measurement_capabilities=get_system_measurement_capabilities(),
+                unavailable_reasons={"execution": f"Execution failed: {str(error_message)}"},
                 note="Execution failed; physical environmental telemetry is UNAVAILABLE."
             )
         )
@@ -211,12 +219,17 @@ class TelemetryCollector:
         self,
         provider: str,
         physical_measurement: Optional[Union[PhysicalMeasurement, Dict[str, Any]]],
-        gpu_telemetry: Optional[Union[GpuTelemetry, Dict[str, Any]]]
+        gpu_telemetry: Optional[Union[GpuTelemetry, Dict[str, Any]]],
+        model: Optional[str] = None,
+        tokens: Optional[TokenTelemetry] = None,
+        inference_latency_ms: Optional[float] = None
     ) -> EnvironmentalTelemetry:
         """
         Resolve environmental metrics with zero fabrication and strict provenance.
-        Supports generic PhysicalMeasurement, with backward compatibility for GpuTelemetry.
-        Cloud APIs (Groq, Google) have physical energy marked as UNAVAILABLE.
+        Supports:
+        1. Local GPU hardware sensor measurements (NVML).
+        2. Verified empirical / LCA estimators for cloud inference (ML.ENERGY / EcoLogits).
+        3. Strict UNAVAILABLE status for unmeasured or unsupported executions.
         """
         ts = datetime.now(timezone.utc).isoformat()
         sys_caps = get_system_measurement_capabilities()
@@ -270,9 +283,8 @@ class TelemetryCollector:
                     details={"label": gpu_obj.label}
                 )
 
-        # If meas_obj was provided and is MEASURED
+        # 1. On-Device Physical Measurement (e.g. Local NVIDIA GPU via NVML)
         if meas_obj and meas_obj.provenance == ProvenanceStatus.MEASURED and meas_obj.value is not None:
-            # If scope is GPU_INFERENCE_WINDOW and gpu_obj is missing, bridge back to gpu_obj
             if meas_obj.scope == MeasurementScope.GPU_INFERENCE_WINDOW and gpu_obj is None:
                 det = meas_obj.details or {}
                 gpu_obj = GpuTelemetry(
@@ -295,21 +307,18 @@ class TelemetryCollector:
                 provider_energy="supported" if meas_obj.provenance == ProvenanceStatus.PROVIDER_REPORTED else "unavailable"
             )
 
-            # Phase 5B: Conditional Local GPU Carbon Calculation
+            # Operational carbon calculation via grid_manager
             carbon_val = None
             carbon_scope = None
             carbon_prov = ProvenanceStatus.UNAVAILABLE
             grid_intensity_used = None
 
             if meas_obj.scope == MeasurementScope.GPU_INFERENCE_WINDOW:
-                grid_factor = getattr(settings, "LOCAL_GRID_INTENSITY_GCO2E_PER_KWH", None)
-                if grid_factor is not None and isinstance(grid_factor, (int, float)) and grid_factor > 0:
-                    # 1 kWh = 3,600,000 J
-                    energy_kwh = meas_obj.value / 3600000.0
-                    carbon_val = round(energy_kwh * float(grid_factor), 6)
+                carbon_val, grid_rec = grid_manager.calculate_operational_carbon(meas_obj.value)
+                if carbon_val is not None and grid_rec is not None:
                     carbon_scope = MeasurementScope.GPU_BOARD_OPERATIONAL_CARBON
                     carbon_prov = ProvenanceStatus.ESTIMATED
-                    grid_intensity_used = float(grid_factor)
+                    grid_intensity_used = grid_rec.intensity_gco2e_per_kwh
 
             if carbon_val is not None:
                 note_str = (
@@ -324,6 +333,8 @@ class TelemetryCollector:
                     "Operational carbon is UNAVAILABLE (configure LOCAL_GRID_INTENSITY_GCO2E_PER_KWH to enable GPU-board carbon calculation)."
                 )
 
+            _, water_prov, water_expl = water_accounting_engine.evaluate_water(provider, model, meas_obj.scope)
+
             return EnvironmentalTelemetry(
                 energy_joules=meas_obj.value,
                 water_liters=None,
@@ -333,15 +344,78 @@ class TelemetryCollector:
                 provenance=ProvenanceStatus.MEASURED,
                 energy_provenance=ProvenanceStatus.MEASURED,
                 carbon_provenance=carbon_prov,
-                water_provenance=ProvenanceStatus.UNAVAILABLE,
+                water_provenance=water_prov,
                 gpu_telemetry=gpu_obj,
                 measurement=meas_obj,
                 measurement_capabilities=caps,
+                source_id="src-nvml-nvidia-2024",
+                source_version="12.0",
+                estimator_name="NvidiaNvmlProvider",
+                estimator_version="1.0.0",
+                data_freshness_status="CURRENT",
+                assumptions=[
+                    "On-device GPU board power sampled via NVML C-bindings during inference window only",
+                    "Host CPU, DRAM, storage, fans, and power supply losses excluded"
+                ],
+                uncertainty_info="Board-level power accuracy is +/- 5W per NVIDIA hardware sensor specifications.",
+                unavailable_reasons={"water": water_expl.get("reason", "Water is UNAVAILABLE on air-cooled client.")},
                 note=note_str
             )
 
-        # Execution without real physical measurement (Cloud APIs, tools, cache, or unavailable hardware)
-        cloud_scope = MeasurementScope.CLOUD_INFERENCE if provider in ("groq", "google") else MeasurementScope.UNKNOWN
+        # 2. Cloud Inference Environmental Estimation (Phase 5B Upgrade)
+        enable_cloud_est = getattr(settings, "ENABLE_CLOUD_ENERGY_ESTIMATION", True)
+        if enable_cloud_est and provider in ("groq", "google", "openai", "anthropic", "cloud") and model:
+            p_in = tokens.input_tokens if (tokens and tokens.input_tokens is not None) else 0
+            p_out = tokens.output_tokens if (tokens and tokens.output_tokens is not None) else 0
+            if (p_in > 0 or p_out > 0) and cloud_energy_estimator.supports(provider, model):
+                est_res = cloud_energy_estimator.estimate(
+                    provider=provider,
+                    model=model,
+                    prompt_tokens=p_in,
+                    completion_tokens=p_out,
+                    latency_ms=inference_latency_ms
+                )
+                if est_res:
+                    est_meas = PhysicalMeasurement(
+                        value=est_res.energy_joules,
+                        unit="J",
+                        provenance=ProvenanceStatus.ESTIMATED,
+                        source=est_res.estimator_name,
+                        scope=est_res.scope,
+                        device_platform=None,
+                        status="AVAILABLE",
+                        timestamp=ts,
+                        details={"assumptions": est_res.assumptions}
+                    )
+                    return EnvironmentalTelemetry(
+                        energy_joules=est_res.energy_joules,
+                        water_liters=None,
+                        carbon_gco2e=None,
+                        carbon_scope=None,
+                        grid_intensity_gco2e_per_kwh=None,
+                        provenance=ProvenanceStatus.ESTIMATED,
+                        energy_provenance=ProvenanceStatus.ESTIMATED,
+                        carbon_provenance=ProvenanceStatus.UNAVAILABLE,
+                        water_provenance=ProvenanceStatus.UNAVAILABLE,
+                        gpu_telemetry=None,
+                        measurement=est_meas,
+                        measurement_capabilities=sys_caps,
+                        source_id=est_res.source_id,
+                        source_version=est_res.source_version,
+                        estimator_name=est_res.estimator_name,
+                        estimator_version=est_res.estimator_version,
+                        data_freshness_status="CURRENT",
+                        assumptions=est_res.assumptions,
+                        uncertainty_info=est_res.uncertainty_info,
+                        unavailable_reasons=est_res.unavailable_reasons,
+                        note=(
+                            f"Cloud inference energy estimated via {est_res.estimator_name} ({est_res.source_id}). "
+                            "Authentically labeled ESTIMATED. Direct water and carbon remain UNAVAILABLE without facility disclosures."
+                        )
+                    )
+
+        # 3. Execution without real physical measurement and without matching estimator
+        cloud_scope = MeasurementScope.CLOUD_INFERENCE if provider in ("groq", "google", "openai", "anthropic") else MeasurementScope.UNKNOWN
         fallback_meas = meas_obj or PhysicalMeasurement(
             value=None,
             unit="J",
@@ -353,6 +427,21 @@ class TelemetryCollector:
             timestamp=ts,
             details={"note": f"Physical measurement unavailable for provider '{provider}'."}
         )
+
+        if provider in ("deterministic", "cache"):
+            unav_reasons = {
+                "energy": f"Execution handled via {provider} with 0 model tokens. Physical energy is UNAVAILABLE unless hardware counters are sampled.",
+                "water": "Water is UNAVAILABLE without host telemetry and regional utility WIE.",
+                "carbon": "Carbon is UNAVAILABLE without measured energy."
+            }
+            note_str = f"Execution handled via {provider} with 0 model tokens. Physical environmental metrics are UNAVAILABLE without hardware sensors."
+        else:
+            unav_reasons = {
+                "energy": f"No validated empirical benchmark or architectural profile available for model '{model}' on provider '{provider}'. Retained as UNAVAILABLE without fabrication.",
+                "water": f"Cloud provider '{provider}' does not disclose data-center facility locations, cooling technology, or WUE.",
+                "carbon": f"Cloud provider '{provider}' data-center location is opaque; grid emissions factor cannot be resolved."
+            }
+            note_str = "Physical environmental metrics are UNAVAILABLE for cloud APIs and non-measured executions in Phase 5B (zero fabrication)."
 
         return EnvironmentalTelemetry(
             energy_joules=None,
@@ -367,7 +456,15 @@ class TelemetryCollector:
             gpu_telemetry=None,
             measurement=fallback_meas,
             measurement_capabilities=sys_caps,
-            note="Physical environmental metrics are UNAVAILABLE for cloud APIs and non-measured executions in Phase 5B (zero fabrication)."
+            source_id=None,
+            source_version=None,
+            estimator_name=None,
+            estimator_version=None,
+            data_freshness_status="NOT_APPLICABLE",
+            assumptions=[],
+            uncertainty_info="No empirical measurement or validated estimation model available.",
+            unavailable_reasons=unav_reasons,
+            note=note_str
         )
 
     def get_capabilities(self) -> MeasurementCapabilities:

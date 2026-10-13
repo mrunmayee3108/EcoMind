@@ -65,7 +65,7 @@ User Query
 | **Provider-Agnostic Model Routing** | Phase 3 | **Completed & Verified** | [`query_analyzer.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/router/query_analyzer.py), [`routing_policy.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/router/routing_policy.py), [`dispatcher.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/models/dispatcher.py) |
 | **Precision-First Semantic Cache** | Phase 4 | **Completed & Verified** | [`semantic_cache.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/cache/semantic_cache.py), [`cache_store.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/cache/cache_store.py), [`compatibility_checker.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/cache/compatibility_checker.py) |
 | **Hardware Telemetry Layer** | Phase 5A | **Completed & Verified** | [`measurement.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/measurement.py), [`gpu.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/gpu.py), [`telemetry.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/telemetry.py) |
-| **Environmental Accounting & Savings** | Phase 5B | **Completed & Verified** | [`savings.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/savings.py), multi-provider scopes, pair-wise non-zero savings rule |
+| **Environmental Accounting & Registry** | Phase 5B | **Completed & Verified** | [`registry.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/registry.py), [`cloud_estimator.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/cloud_estimator.py), [`grid.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/grid.py), [`water.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/water.py), [`savings.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/savings.py), Non-Zero Rule, 156 tests |
 | **Multi-Objective Optimizer** | Phase 6 | Planned | Pareto router balancing quality, latency, cost, and energy |
 | **Eco Receipt Generation** | Phase 7 | Planned | Per-inference itemized environmental receipts |
 | **Benchmarking & Paper** | Phase 8–11 | Planned | Evaluation suite, ablation studies, and academic manuscript |
@@ -226,13 +226,17 @@ backend/
 │    └── model_profiles.py ────── Model catalog definitions across small, medium, and large tiers
 │
 ├── telemetry/
-│    ├── schemas.py ───────────── ProvenanceStatus, MeasurementScope, PhysicalMeasurement,
-│    │                            GpuTelemetry, EnvironmentalTelemetry, TelemetryRecord,
+│    ├── schemas.py ───────────── ProvenanceStatus, MeasurementScope, ComparisonType, SourceType,
+│    │                            EnvironmentalSource, GridIntensityRecord, TelemetryRecord,
 │    │                            AvoidanceTelemetry, MetricSavings, SavingsComparison
 │    ├── measurement.py ───────── Generic MeasurementProvider ABC (NvidiaNvmlProvider,
 │    │                            AndroidEnergyProvider, AppleEnergyProvider, UnavailableProvider)
 │    ├── gpu.py ───────────────── NVML ctypes C-binding with nvidia-smi fallback
-│    ├── savings.py ───────────── Pair-Wise Non-Zero Rule savings calculator (calculate_savings)
+│    ├── registry.py ──────────── Versioned EnvironmentalSource registry with freshness audits (VALID, REVIEW_NEEDED, STALE)
+│    ├── cloud_estimator.py ───── Pluggable CloudEnergyEstimator (MLEnergyEstimator v3.0, EcoLogitsEstimator LCA, Composite)
+│    ├── grid.py ──────────────── GridIntensityManager with live adapter + Ember Climate 2024 regional fallbacks
+│    ├── water.py ─────────────── WaterAccountingEngine with 4-scope water categories & anti-fabrication gates
+│    ├── savings.py ───────────── Pair-Wise Non-Zero Rule savings calculator with comparison types & quality penalties
 │    └── telemetry.py ─────────── Central thread-safe TelemetryCollector ring-buffer & capability resolver
 │
 └── config/
@@ -584,5 +588,9 @@ SavingsComparison ([telemetry/schemas.py](file:///c:/Users/Mrunmayee%20Potdar/De
 | `/telemetry/capabilities` | `GET` | *None* | [`MeasurementCapabilities`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/schemas.py) | Introspects host system physical measurement capabilities (`gpu_energy`, `system_energy`, `device_energy`, `provider_energy`). |
 | `/telemetry/recent` | `GET` | `limit: int = 50` | `List[TelemetryRecord]` | Retrieves recent telemetry records with provenance and avoidance facts. |
 | `/telemetry/summary` | `GET` | *None* | [`TelemetrySummary`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/schemas.py) | Aggregates request counts, route breakdowns, provider distributions, and hardware measurement totals. |
-| `/telemetry/savings/compare` | `POST` | [`SavingsCompareRequest`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | [`SavingsComparison`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/schemas.py) | Computes pair-wise savings between two requests, strictly enforcing the Non-Zero Rule. |
+| `/telemetry/savings/compare` | `POST` | [`SavingsCompareRequest`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | [`SavingsComparison`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/schemas.py) | Computes pair-wise savings between two requests, strictly enforcing the Non-Zero Rule, comparison types, and quality gates. |
+| `/telemetry/sources` | `GET` | *None* | `List[EnvironmentalSource]` | Returns all registered environmental accounting sources, methodology notes, and validation statuses. |
+| `/telemetry/sources/{id}` | `GET` | *Path Parameter* | `EnvironmentalSource` | Inspects citation details, empirical coefficients, and review recommendations for a specific source. |
+| `/telemetry/sources/refresh` | `POST` | *None* | `List[SourceCheckResult]` | Runs an automated freshness audit across all registered environmental coefficients and flags stale/review-needed entries. |
+| `/telemetry/grid` | `GET` | *None* | `GridIntensityRecord` | Returns the active grid carbon intensity ($gCO_2e/\text{kWh}$), region, live provider status, and fallback state. |
 | `/telemetry/clear` | `POST` | *None* | `Dict[str, Any]` | Flushes the in-memory telemetry buffer. |

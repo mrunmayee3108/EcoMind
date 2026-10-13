@@ -360,19 +360,42 @@ Phase 5B operationalizes the peer-reviewed environmental accounting methodology 
 ### 2. Telemetry & Accounting API Endpoints
 
 * `GET /telemetry/capabilities`: Introspect supported physical measurement capabilities of the host system.
-* `GET /telemetry/recent?limit=50`: Retrieve recent execution telemetry records.
+* `GET /telemetry/recent?limit=50`: Retrieve recent execution telemetry records with full provenance.
 * `GET /telemetry/summary`: Aggregated breakdown of requests, routes, providers, tokens, physical measurements, and system capabilities.
-* `POST /telemetry/savings/compare`: Compute pair-wise savings between two recorded requests enforcing the Non-Zero Rule and quality gates.
+* `POST /telemetry/savings/compare`: Compute pair-wise savings between two recorded requests enforcing the Non-Zero Rule, comparison types, and quality gates.
+* `GET /telemetry/sources`: Audit all versioned environmental accounting sources, citations, methodologies, and freshness statuses.
+* `GET /telemetry/sources/{source_id}`: Inspect specific citation metadata, coefficients, URLs, and review schedules.
+* `POST /telemetry/sources/refresh`: Execute an automated freshness audit across all registered environmental coefficients.
+* `GET /telemetry/grid`: Introspect active grid carbon intensity ($gCO_2e/\text{kWh}$), region, dynamic adapter status, and fallback state.
 * `POST /telemetry/clear`: Clear the in-memory telemetry buffer.
 
-### 3. Limitations
+### 3. Phase 5B Upgrade: Fresh, Auditable Environmental Accounting
+
+1. **Versioned Source Registry (`registry.py`)**:
+   Tracks empirical citations (ML.ENERGY v3.0, EcoLogits 2024, Elsworth et al. 2025 Google TPU v5e, Ember 2024, Electricity Maps) with SHA-256 integrity verification, expiry dates, and automatic staleness audits (`VALID`, `REVIEW_NEEDED`, `STALE`, `DEPRECATED`).
+2. **Pluggable Cloud Energy Estimators (`cloud_estimator.py`)**:
+   - `MLEnergyEstimator`: Empirical benchmark-backed estimates (Joules per output/input token) from ML.ENERGY Leaderboard v3.0.
+   - `EcoLogitsEstimator`: Life-Cycle Assessment (LCA) model calculating electrical energy ($E_{\text{elec}}$) and embodied footprint ($E_{\text{embodied}}$) using published hardware parameters.
+   - `CompositeCloudEstimator`: Selects preferred estimator or computes consensus ranges with explicit uncertainty notes.
+   - Guarded by `ENABLE_CLOUD_ENERGY_ESTIMATION` (default `False` preserving strict unestimated baseline).
+3. **Regional Grid Carbon Intensity Management (`grid.py`)**:
+   - Live carbon adapter with automatic graceful fallback to Ember Climate 2024 regional annual averages (`US`, `US-CA`, `IN`, `DE`, `FR`, `UK`, `EU`, `GLOBAL`).
+   - Strict physical calculation: $E_{\text{kWh}} = E_{\text{joules}} / 3{,}600{,}000$, $\text{Carbon}_{gCO_2e} = E_{\text{kWh}} \times I_{\text{grid}}$.
+4. **Water Accounting Safeguards (`water.py`)**:
+   - Distinguishes 4 separate water categories: On-site Scope 1 direct evaporative cooling, Scope 2 indirect power-generation water, Scope 3 supply chain/embodied water, and total life-cycle water.
+   - Emits `UNAVAILABLE` when operational facility WUE or location is undisclosed by cloud providers (anti-fabrication safeguard).
+5. **Enhanced Pair-Wise Savings Comparison (`savings.py`)**:
+   - Classifies comparisons into `MEASURED_VS_MEASURED`, `ESTIMATED_VS_ESTIMATED`, `MIXED_PROVENANCE`, or `UNAVAILABLE`.
+   - Quality Gate: If the selected route fails the minimum quality threshold, a quality degradation penalty is logged and physical savings are penalized.
+
+### 4. Limitations
 
 1. **GPU Energy vs. System Energy**: MEASURED GPU ENERGY measures only the NVIDIA GPU die and memory power draw during inference. It is **not** the total power consumed by the server or host machine (CPU, RAM, storage, cooling fans, and PSU conversion losses are excluded).
-2. **Cloud API Opacity**: Cloud providers do not disclose per-request physical energy, dynamic batch concurrency, facility locations, or cooling water. These fields are explicitly marked `UNAVAILABLE` and set to `null`.
+2. **Cloud API Opacity**: Cloud providers do not disclose per-request physical energy, dynamic batch concurrency, facility locations, or cooling water. When cloud estimation is disabled or unverified, these fields are explicitly marked `UNAVAILABLE` and set to `null`.
 3. **Mobile Client Ingestion**: The backend does not directly query mobile device sensors; mobile client telemetry requires client-side transmission.
 4. **Subsequent Roadmap**:
    * **Phase 5A**: Hardware-agnostic telemetry layer & NVIDIA GPU sampling (Complete).
-   * **Phase 5B**: Environmental accounting methodology & multi-provider architecture (Complete).
+   * **Phase 5B**: Environmental accounting methodology, versioned source registry & pluggable cloud estimation (Complete & Verified).
    * **Phase 6**: Multi-objective Pareto routing optimizer (Upcoming).
    * **Phase 7**: Comprehensive user-facing Eco Receipts (Upcoming).
 
