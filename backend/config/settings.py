@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     DEFAULT_LARGE_MODEL: str = "gemini-pro-latest"
     LOCAL_PROVIDER_FALLBACK: bool = True
 
+    # Phase 5B Environmental Accounting Settings
+    # Local grid emissions factor in gCO2e per kWh (e.g. 370.0 for US national average, or region-specific factor).
+    # If None or <= 0, local GPU operational carbon is reported as UNAVAILABLE without fabrication.
+    LOCAL_GRID_INTENSITY_GCO2E_PER_KWH: Optional[float] = None
+
     # Semantic Cache Settings (Phase 4 Precision-First & Lifecycle Controls)
     CACHE_ENABLED: bool = True
     CACHE_SIMILARITY_THRESHOLD: float = 0.90

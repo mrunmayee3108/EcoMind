@@ -350,13 +350,14 @@ class TestTelemetryUnit(unittest.TestCase):
         self.assertEqual(rec_dev.environment.measurement_capabilities.gpu_energy, "unavailable")
 
     def test_provenance_correctness(self):
-        """14. Provenance correctness: Strictly distinguishes MEASURED, PROVIDER_REPORTED, and UNAVAILABLE without ESTIMATED."""
+        """14. Provenance correctness: Strictly distinguishes MEASURED, PROVIDER_REPORTED, ESTIMATED, and UNAVAILABLE."""
         # Confirm valid statuses
         statuses = [p.value for p in ProvenanceStatus]
         self.assertIn("MEASURED", statuses)
         self.assertIn("PROVIDER_REPORTED", statuses)
+        self.assertIn("ESTIMATED", statuses)
         self.assertIn("UNAVAILABLE", statuses)
-        self.assertNotIn("ESTIMATED", statuses, "ESTIMATED must NOT exist in Phase 5A")
+        self.assertEqual(len(statuses), 4)
 
     def test_cloud_provider_physical_energy_remains_unavailable(self):
         """15. Cloud provider integrity: Groq and Google calls leave physical energy strictly UNAVAILABLE."""

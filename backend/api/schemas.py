@@ -14,7 +14,12 @@ class TokenUsageSchema(BaseModel):
     total_tokens: Optional[int] = None
     is_estimated: bool = False
 
-from telemetry.schemas import TelemetryRecord, TelemetrySummary
+from telemetry.schemas import TelemetryRecord, TelemetrySummary, SavingsComparison
+
+class SavingsCompareRequest(BaseModel):
+    selected_request_id: str = Field(..., description="Request ID of the executed route to evaluate")
+    baseline_request_id: str = Field(..., description="Request ID of the baseline route to compare against")
+    quality_threshold_met: bool = Field(default=True, description="Whether the selected route met the required quality threshold")
 
 class ChatResponse(BaseModel):
     query: str

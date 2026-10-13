@@ -8,7 +8,8 @@ from .schemas import (
     TokenUsageSchema,
     ToolInfoSchema,
     ModelProfileSchema,
-    CacheStatsSchema
+    CacheStatsSchema,
+    SavingsCompareRequest
 )
 from tools.tool_registry import tool_registry
 from router.query_analyzer import QueryAnalyzer
@@ -18,7 +19,8 @@ from models.model_profiles import list_all_profiles
 from models.provider import TokenUsage
 from cache.semantic_cache import semantic_cache
 from telemetry.telemetry import telemetry_collector
-from telemetry.schemas import TelemetryRecord, TelemetrySummary, MeasurementCapabilities
+from telemetry.schemas import TelemetryRecord, TelemetrySummary, MeasurementCapabilities, SavingsComparison
+from telemetry.savings import calculate_savings
 
 router = APIRouter()
 
@@ -350,4 +352,31 @@ def clear_telemetry():
     """Clear recorded in-memory telemetry."""
     telemetry_collector.clear()
     return {"message": "Telemetry records cleared successfully."}
+
+@router.post("/telemetry/savings/compare", response_model=SavingsComparison)
+def compare_telemetry_savings(request: SavingsCompareRequest):
+    """
+    Compute pair-wise savings between two recorded requests.
+    Enforces the Non-Zero Rule: if either route lacks authentic environmental metrics,
+    environmental savings are strictly UNAVAILABLE; operational proxies are reported instead.
+    """
+    sel = telemetry_collector.get_record(request.selected_request_id)
+    if not sel:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Selected telemetry record '{request.selected_request_id}' not found."
+        )
+
+    base = telemetry_collector.get_record(request.baseline_request_id)
+    if not base:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Baseline telemetry record '{request.baseline_request_id}' not found."
+        )
+
+    return calculate_savings(
+        selected=sel,
+        baseline=base,
+        quality_threshold_met=request.quality_threshold_met
+    )
 

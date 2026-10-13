@@ -7,6 +7,9 @@ from .schemas import (
     LatencyTelemetry,
     GpuTelemetry,
     EnvironmentalTelemetry,
+    AvoidanceTelemetry,
+    MetricSavings,
+    SavingsComparison,
     TelemetryRecord,
     TelemetrySummary,
 )
@@ -21,6 +24,7 @@ from .measurement import (
     get_system_measurement_capabilities,
 )
 from .telemetry import TelemetryCollector, telemetry_collector
+from .savings import calculate_savings
 
 __all__ = [
     "ProvenanceStatus",
@@ -31,6 +35,9 @@ __all__ = [
     "LatencyTelemetry",
     "GpuTelemetry",
     "EnvironmentalTelemetry",
+    "AvoidanceTelemetry",
+    "MetricSavings",
+    "SavingsComparison",
     "TelemetryRecord",
     "TelemetrySummary",
     "GpuEnergyMonitor",
@@ -45,4 +52,5 @@ __all__ = [
     "get_system_measurement_capabilities",
     "TelemetryCollector",
     "telemetry_collector",
+    "calculate_savings",
 ]

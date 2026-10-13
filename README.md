@@ -34,10 +34,11 @@ backend/
 │   └── model_profiles.py       # Catalog for small, medium, large tiers
 ├── telemetry/
 │   ├── __init__.py             # Telemetry module exports
-│   ├── schemas.py              # TelemetryRecord, ProvenanceStatus, GpuTelemetry, PhysicalMeasurement models
+│   ├── schemas.py              # TelemetryRecord, ProvenanceStatus, GpuTelemetry, PhysicalMeasurement, SavingsComparison
 │   ├── measurement.py          # Generic MeasurementProvider interface (NvidiaNvml, Android, Apple, Unavailable)
 │   ├── gpu.py                  # High-speed NVML / nvidia-smi GPU power & energy sampler
-│   └── telemetry.py            # Central thread-safe TelemetryCollector
+│   ├── savings.py              # Pair-Wise Environmental Savings Integrity Engine (Non-Zero Rule)
+│   └── telemetry.py            # Central thread-safe TelemetryCollector with conditional carbon & avoidance
 ├── tools/
 │   ├── base.py                 # BaseTool & ToolResult abstractions
 │   ├── calculator.py           # Safe AST-based deterministic calculator
@@ -47,7 +48,7 @@ backend/
 │   ├── text_analyzer.py        # Deterministic text metrics (word/char/sentence count, frequency)
 │   └── tool_registry.py        # Central tool registry & candidate matcher
 ├── config/
-│   └── settings.py             # Application settings & environment variables
+│   └── settings.py             # Application settings & environment variables (including LOCAL_GRID_INTENSITY_GCO2E_PER_KWH)
 └── tests/
     ├── test_calculator.py          # Unit tests for Calculator arithmetic & safety
     ├── test_unit_converter.py      # Unit tests for UnitConverter dimensions & edge cases
@@ -61,6 +62,7 @@ backend/
     ├── test_dispatcher.py          # Unit tests for ModelDispatcher
     ├── test_semantic_cache.py      # Unit tests for Precision-First Semantic Cache
     ├── test_telemetry.py           # Unit tests for Phase 5A measurement infrastructure
+    ├── test_environmental_accounting.py # Unit tests for Phase 5B environmental accounting & Non-Zero Rule
     └── test_api.py                 # Integration tests for FastAPI endpoints
 frontend/                       # React 19 + Vite 8 + Tailwind CSS v4 dashboard
 ```
@@ -313,31 +315,56 @@ The system degrades gracefully according to three principles:
 
 ### 5. Data Provenance & Classification
 
-EcoMind categorizes all telemetry into three strict provenance categories:
+EcoMind categorizes all telemetry into four strict provenance categories:
 
 | Provenance Status | Description | Used For |
 |---|---|---|
 | `MEASURED` | Directly measured on the host system using high-resolution timers, hardware sensors, or exact mathematical counts. | Total execution time, inference duration, deterministic tool tokens (0), semantic cache tokens (0), on-device GPU power/energy. |
 | `PROVIDER_REPORTED` | Authentic metrics returned directly by model APIs and daemon protocols. | Prompt tokens, completion tokens, and total tokens from Groq (`chat.completion.usage`), Google Gemini (`response.usage_metadata`), and Ollama (`prompt_eval_count`, `eval_count`); authentic client-transmitted mobile telemetry. |
+| `ESTIMATED` | Scientifically grounded estimates derived transparently from measured energy and verified operational parameters. | Local GPU-board operational carbon derived from measured GPU energy and user-configured grid carbon intensity (`LOCAL_GRID_INTENSITY_GCO2E_PER_KWH`). |
 | `UNAVAILABLE` | Physical values that cannot be authentically measured on the current system or for cloud providers. | Physical energy, water, and carbon for cloud API calls (Groq, Gemini); physical energy when hardware/sensor is absent; tokens/latencies on failed requests. |
 
-> **Zero-Fabrication Guarantee**: `ESTIMATED` status is deliberately omitted until peer-reviewed estimation models are implemented in Phase 5B.
+---
 
-### 6. Limitations
+## Phase 5B: Environmental Accounting Methodology & Multi-Provider Architecture
 
-1. **GPU Energy vs. System Energy**: MEASURED GPU ENERGY measures only the NVIDIA GPU die and memory power draw during inference. It is **not** the total power consumed by the server or host machine (CPU, RAM, storage, cooling fans, and PSU conversion losses are excluded).
-2. **Cloud API Boundary**: For Groq LPUs and Google Gemini TPUs/GPUs, physical power cannot be measured by the client. These fields are explicitly marked `UNAVAILABLE` and set to `null`.
-3. **Mobile Client Access**: The backend does not directly access client phone hardware. Mobile telemetry requires client-side transmission.
-4. **In-Memory Buffer**: Telemetry records are stored in an in-memory thread-safe circular buffer (default: 1000 records).
-5. **Subsequent Roadmap**:
-   * **Phase 5B**: Peer-reviewed environmental estimation models for cloud APIs.
-   * **Phase 6**: Multi-objective Pareto routing optimizer.
-   * **Phase 7**: Comprehensive user-facing Eco Receipts.
+Phase 5B operationalizes the peer-reviewed environmental accounting methodology designed in [`docs/research/phase_5b_environmental_accounting.md`](docs/research/phase_5b_environmental_accounting.md), enforcing strict scientific integrity across multiple providers.
 
-### 7. Telemetry API Endpoints
+### 1. Five Core Accounting Principles
+
+1. **Strict UNAVAILABLE Status for Cloud APIs**:  
+   Neither Groq nor Google Gemini discloses per-request API energy, data-center locations, or cooling water. EcoMind strictly reports their physical energy, water, and carbon as `null` with `ProvenanceStatus.UNAVAILABLE`. Zero fabrication.
+2. **Local GPU Measurement Boundary Scoping**:  
+   On-device NVIDIA GPU power is sampled via NVML strictly during the active model inference window (`MeasurementScope.GPU_INFERENCE_WINDOW`). It is explicitly labeled as GPU-board energy only, never conflated with total server or host system energy.
+3. **Conditional Local GPU-Board Operational Carbon**:  
+   Operational carbon ($gCO_2e$) for local GPU execution is calculated *only* when the user explicitly configures their regional grid carbon intensity via `LOCAL_GRID_INTENSITY_GCO2E_PER_KWH` in `.env` or settings ($> 0$). It is strictly scoped to `MeasurementScope.GPU_BOARD_OPERATIONAL_CARBON` (`ProvenanceStatus.ESTIMATED`). If unconfigured or $\le 0$, carbon is strictly `null` with `ProvenanceStatus.UNAVAILABLE`.
+4. **Deterministic Tool & Cache Avoidance Facts**:  
+   Deterministic tools and semantic cache hits consume $0$ model tokens (`MEASURED`) and execute with dynamic wall-clock latency measured via high-resolution system timers (`time.perf_counter`). They record authentic operational avoidance facts relative to an explicit baseline:
+   $$\Delta \text{Model Calls} = 1 \quad (\text{avoided relative to counterfactual model baseline})$$
+   $$\Delta \text{Tokens} = \text{Tokens}_{\text{baseline}} \quad (\text{avoided})$$
+   Physical energy, water, and carbon are marked `UNAVAILABLE` unless hardware counters are sampled (never fabricated as 0.0 J or 0.0 mL).
+5. **The Pair-Wise Savings Integrity Rule (The Non-Zero Rule)**:  
+   When comparing an executed route against a baseline route:
+   $$\text{If either } M(R_{\text{selected}}) = \text{UNAVAILABLE} \quad \text{or} \quad M(R_{\text{baseline}}) = \text{UNAVAILABLE}:$$
+   $$\Delta M = M(R_{\text{baseline}}) - M(R_{\text{selected}}) \equiv \mathbf{UNAVAILABLE}$$
+   Unmeasured or unavailable metrics are **never treated as zero**. When physical savings are unavailable, authentic proxy savings ($\Delta \text{Model Calls}$, $\Delta \text{Tokens}$, $\Delta \text{Latency}$) are reported alongside an integrity notice. Furthermore, environmental savings can only be credited if the selected route met the required answer quality threshold ($\text{Quality} \ge Q_{\text{req}}$).
+
+### 2. Telemetry & Accounting API Endpoints
 
 * `GET /telemetry/capabilities`: Introspect supported physical measurement capabilities of the host system.
 * `GET /telemetry/recent?limit=50`: Retrieve recent execution telemetry records.
 * `GET /telemetry/summary`: Aggregated breakdown of requests, routes, providers, tokens, physical measurements, and system capabilities.
+* `POST /telemetry/savings/compare`: Compute pair-wise savings between two recorded requests enforcing the Non-Zero Rule and quality gates.
 * `POST /telemetry/clear`: Clear the in-memory telemetry buffer.
+
+### 3. Limitations
+
+1. **GPU Energy vs. System Energy**: MEASURED GPU ENERGY measures only the NVIDIA GPU die and memory power draw during inference. It is **not** the total power consumed by the server or host machine (CPU, RAM, storage, cooling fans, and PSU conversion losses are excluded).
+2. **Cloud API Opacity**: Cloud providers do not disclose per-request physical energy, dynamic batch concurrency, facility locations, or cooling water. These fields are explicitly marked `UNAVAILABLE` and set to `null`.
+3. **Mobile Client Ingestion**: The backend does not directly query mobile device sensors; mobile client telemetry requires client-side transmission.
+4. **Subsequent Roadmap**:
+   * **Phase 5A**: Hardware-agnostic telemetry layer & NVIDIA GPU sampling (Complete).
+   * **Phase 5B**: Environmental accounting methodology & multi-provider architecture (Complete).
+   * **Phase 6**: Multi-objective Pareto routing optimizer (Upcoming).
+   * **Phase 7**: Comprehensive user-facing Eco Receipts (Upcoming).
 

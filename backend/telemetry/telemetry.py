@@ -13,6 +13,7 @@ from .schemas import (
     LatencyTelemetry,
     GpuTelemetry,
     EnvironmentalTelemetry,
+    AvoidanceTelemetry,
     TelemetryRecord,
     TelemetrySummary
 )
@@ -20,6 +21,7 @@ from .measurement import (
     MeasurementProvider,
     get_system_measurement_capabilities,
 )
+from config.settings import settings
 from models.provider import TokenUsage
 
 class TelemetryCollector:
@@ -47,7 +49,8 @@ class TelemetryCollector:
         token_usage: Optional[Union[TokenUsage, Dict[str, Any]]] = None,
         physical_measurement: Optional[Union[PhysicalMeasurement, Dict[str, Any]]] = None,
         gpu_telemetry: Optional[Union[GpuTelemetry, Dict[str, Any]]] = None,
-        request_id: Optional[str] = None
+        request_id: Optional[str] = None,
+        avoidance: Optional[AvoidanceTelemetry] = None
     ) -> TelemetryRecord:
         """Record telemetry for a successfully executed control plane query."""
         req_id = request_id or str(uuid.uuid4())
@@ -70,6 +73,15 @@ class TelemetryCollector:
             gpu_telemetry=gpu_telemetry
         )
 
+        # 4. Model Call & Token Avoidance Telemetry (Phase 5B)
+        if avoidance is None and provider in ("deterministic", "cache"):
+            avoidance = AvoidanceTelemetry(
+                model_calls_avoided=1,
+                tokens_avoided=None,
+                baseline_route="large_model",
+                reasoning=f"Satisfied via {provider} without neural network inference."
+            )
+
         record = TelemetryRecord(
             request_id=req_id,
             timestamp=ts,
@@ -80,7 +92,8 @@ class TelemetryCollector:
             error_message=None,
             tokens=tokens,
             latency=latency,
-            environment=env
+            environment=env,
+            avoidance=avoidance
         )
 
         with self._lock:
@@ -282,18 +295,49 @@ class TelemetryCollector:
                 provider_energy="supported" if meas_obj.provenance == ProvenanceStatus.PROVIDER_REPORTED else "unavailable"
             )
 
+            # Phase 5B: Conditional Local GPU Carbon Calculation
+            carbon_val = None
+            carbon_scope = None
+            carbon_prov = ProvenanceStatus.UNAVAILABLE
+            grid_intensity_used = None
+
+            if meas_obj.scope == MeasurementScope.GPU_INFERENCE_WINDOW:
+                grid_factor = getattr(settings, "LOCAL_GRID_INTENSITY_GCO2E_PER_KWH", None)
+                if grid_factor is not None and isinstance(grid_factor, (int, float)) and grid_factor > 0:
+                    # 1 kWh = 3,600,000 J
+                    energy_kwh = meas_obj.value / 3600000.0
+                    carbon_val = round(energy_kwh * float(grid_factor), 6)
+                    carbon_scope = MeasurementScope.GPU_BOARD_OPERATIONAL_CARBON
+                    carbon_prov = ProvenanceStatus.ESTIMATED
+                    grid_intensity_used = float(grid_factor)
+
+            if carbon_val is not None:
+                note_str = (
+                    f"Physical GPU energy directly measured ({meas_obj.scope.value} via {meas_obj.source}). "
+                    f"GPU-board operational carbon estimated at {carbon_val} gCO2e using configured grid intensity ({grid_intensity_used} gCO2e/kWh). "
+                    "Strictly scoped to GPU board; does NOT represent total system energy. Water is UNAVAILABLE."
+                )
+            else:
+                note_str = (
+                    f"Physical energy directly measured ({meas_obj.scope.value} via {meas_obj.source}). "
+                    "Does NOT represent total system energy. Water is UNAVAILABLE. "
+                    "Operational carbon is UNAVAILABLE (configure LOCAL_GRID_INTENSITY_GCO2E_PER_KWH to enable GPU-board carbon calculation)."
+                )
+
             return EnvironmentalTelemetry(
                 energy_joules=meas_obj.value,
                 water_liters=None,
-                carbon_gco2e=None,
+                carbon_gco2e=carbon_val,
+                carbon_scope=carbon_scope,
+                grid_intensity_gco2e_per_kwh=grid_intensity_used,
                 provenance=ProvenanceStatus.MEASURED,
+                energy_provenance=ProvenanceStatus.MEASURED,
+                carbon_provenance=carbon_prov,
+                water_provenance=ProvenanceStatus.UNAVAILABLE,
                 gpu_telemetry=gpu_obj,
                 measurement=meas_obj,
                 measurement_capabilities=caps,
-                note=(
-                    f"Physical energy directly measured ({meas_obj.scope.value} via {meas_obj.source}). "
-                    "Does NOT represent total system energy. Water and carbon are UNAVAILABLE."
-                )
+                note=note_str
             )
 
         # Execution without real physical measurement (Cloud APIs, tools, cache, or unavailable hardware)
@@ -314,11 +358,16 @@ class TelemetryCollector:
             energy_joules=None,
             water_liters=None,
             carbon_gco2e=None,
+            carbon_scope=None,
+            grid_intensity_gco2e_per_kwh=None,
             provenance=ProvenanceStatus.UNAVAILABLE,
+            energy_provenance=ProvenanceStatus.UNAVAILABLE,
+            carbon_provenance=ProvenanceStatus.UNAVAILABLE,
+            water_provenance=ProvenanceStatus.UNAVAILABLE,
             gpu_telemetry=None,
             measurement=fallback_meas,
             measurement_capabilities=sys_caps,
-            note="Physical environmental metrics are UNAVAILABLE for cloud APIs and non-measured executions in Phase 5A (zero fabrication)."
+            note="Physical environmental metrics are UNAVAILABLE for cloud APIs and non-measured executions in Phase 5B (zero fabrication)."
         )
 
     def get_capabilities(self) -> MeasurementCapabilities:
@@ -359,6 +408,14 @@ class TelemetryCollector:
             summary.providers_breakdown[rec.provider] = summary.providers_breakdown.get(rec.provider, 0) + 1
 
         return summary
+
+    def get_record(self, request_id: str) -> Optional[TelemetryRecord]:
+        """Find and return a recorded telemetry record by its unique request ID."""
+        with self._lock:
+            for rec in self._records:
+                if rec.request_id == request_id:
+                    return rec
+        return None
 
     def clear(self):
         """Reset all in-memory telemetry records."""

@@ -2,7 +2,7 @@
 
 > **Concise Engineering Reference & System Knowledge**  
 > *Target Audience: Project Owner & AI Coding Assistants*  
-> *Current Status: Phase 3 Completed & Live Integrated (Provider-Agnostic Model Routing & Deterministic Tools)*  
+> *Current Status: Phase 5B Completed & Verified (Environmental Accounting Methodology & Multi-Provider Architecture)*  
 > *Detailed System Diagrams & Execution Traces: see [ARCHITECTURE.md](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/ARCHITECTURE.md)*
 
 ---
@@ -39,7 +39,7 @@ Similarly, for **"convert 100 km to miles"**:
 | **Phase 3** | Tool Expansion + Provider-Agnostic Routing | Completed | **Yes** | 5 deterministic tools, `ToolRegistry`, `QueryAnalyzer`, `RoutingPolicy`, `GroqProvider`, `ModelDispatcher`, live `/chat` integration, 75 tests |
 | **Phase 4** | Semantic Cache & Lifecycle Controls | Completed | **Yes** | SentenceTransformers (`all-MiniLM-L6-v2`), FAISS vector index, SQLite metadata store, LRU & TTL eviction, Stage 2 conservative `CompatibilityChecker`, 97 tests |
 | **Phase 5A** | Hardware-Agnostic Telemetry & Measurement | Completed | **Yes** | Generic `MeasurementProvider` abstraction (`NvidiaNvmlProvider`, `AndroidEnergyProvider`, `AppleEnergyProvider`, `UnavailableProvider`), explicit scopes, capabilities API, 117 tests |
-| **Phase 5B** | Environmental Estimator | Planned | **No** | Energy (Wh), water (mL), and carbon (gCO2e) peer-reviewed models for cloud providers |
+| **Phase 5B** | Environmental Accounting Methodology | Completed | **Yes** | Multi-provider accounting, conditional local GPU carbon, tool/cache avoidance facts, Pair-Wise Non-Zero Savings Rule (`savings.py`), 129 tests |
 | **Phase 6** | Multi-Objective Optimizer | Planned | **No** | Normalized Pareto cost optimization over quality, latency, carbon, cost |
 | **Phase 7** | Eco Receipt | Planned | **No** | Itemized environmental invoice for each inference request |
 | **Phase 8** | Sustainability Dashboard | Planned | **No** | Long-term analytics, carbon-avoidance visualization |

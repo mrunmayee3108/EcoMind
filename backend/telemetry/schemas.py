@@ -5,21 +5,25 @@ from pydantic import BaseModel, Field
 class ProvenanceStatus(str, Enum):
     """
     Data provenance and measurement authenticity classification.
-    Phase 5A strictly distinguishes between directly measured hardware data,
-    provider-reported API metadata, and unavailable physical metrics.
-    ESTIMATED is intentionally not used in Phase 5A.
+    Phase 5B supports four distinct provenance levels:
+    - MEASURED: Directly measured hardware sensors, high-res timers, or verified zero counts.
+    - PROVIDER_REPORTED: Metadata returned authentically by APIs (token counts).
+    - ESTIMATED: Scientific estimates (e.g. operational carbon derived from measured energy and grid factor).
+    - UNAVAILABLE: Unmeasured physical values (cloud physical energy, water, undisclosed data).
+    Zero fabrication: synthetic hardcoded constants are barred.
     """
     MEASURED = "MEASURED"
     PROVIDER_REPORTED = "PROVIDER_REPORTED"
+    ESTIMATED = "ESTIMATED"
     UNAVAILABLE = "UNAVAILABLE"
 
 class MeasurementScope(str, Enum):
     """
-    Explicit physical boundary/scope for what was actually measured.
-    Do NOT call all device measurements simply 'energy'.
-    The scope specifies the exact measurement boundary.
+    Explicit physical boundary/scope for what was actually measured or estimated.
+    Never conflate GPU board energy with total system or cloud inference energy.
     """
     GPU_INFERENCE_WINDOW = "GPU_INFERENCE_WINDOW"
+    GPU_BOARD_OPERATIONAL_CARBON = "GPU_BOARD_OPERATIONAL_CARBON"
     DEVICE = "DEVICE"
     SYSTEM = "SYSTEM"
     CLOUD_INFERENCE = "CLOUD_INFERENCE"
@@ -110,11 +114,25 @@ class GpuTelemetry(BaseModel):
         description="Sensor or measurement provider source"
     )
 
+class AvoidanceTelemetry(BaseModel):
+    """
+    Verified operational proxies for avoided resource consumption relative to an explicit baseline.
+    Avoided model calls and tokens are authentic operational facts, never converted to fabricated energy or water.
+    """
+    model_calls_avoided: int = Field(default=0, description="Number of model inference calls avoided vs baseline")
+    tokens_avoided: Optional[int] = Field(default=None, description="Tokens avoided relative to baseline if known")
+    baseline_route: str = Field(default="large_model", description="Explicit baseline against which avoidance is measured")
+    reasoning: str = Field(default="", description="Operational justification (e.g. 'Satisfied via deterministic tool')")
+
 class EnvironmentalTelemetry(BaseModel):
     """
     Physical environmental metrics for inference execution.
-    In Phase 5A, physical environmental data is UNAVAILABLE for cloud providers
-    and zero values are fabricated.
+    In Phase 5B:
+    - Cloud APIs: physical energy, water, and carbon remain strictly UNAVAILABLE (zero fabrication).
+    - Local GPU execution: energy is MEASURED (GPU_INFERENCE_WINDOW scope).
+    - Local GPU carbon: ESTIMATED conditionally only when LOCAL_GRID_INTENSITY_GCO2E_PER_KWH > 0,
+      scoped strictly to GPU_BOARD_OPERATIONAL_CARBON. Otherwise UNAVAILABLE.
+    - Water: strictly UNAVAILABLE across all routes.
     """
     energy_joules: Optional[float] = Field(
         default=None,
@@ -122,15 +140,35 @@ class EnvironmentalTelemetry(BaseModel):
     )
     water_liters: Optional[float] = Field(
         default=None,
-        description="Water consumption. UNAVAILABLE in Phase 5A (no fabrication)."
+        description="Water consumption. UNAVAILABLE across all routes in Phase 5B (no fabrication)."
     )
     carbon_gco2e: Optional[float] = Field(
         default=None,
-        description="Carbon emissions. UNAVAILABLE in Phase 5A (no fabrication)."
+        description="Operational carbon emissions. Populated conditionally for local GPU when grid intensity is configured."
+    )
+    carbon_scope: Optional[MeasurementScope] = Field(
+        default=None,
+        description="Boundary scope of carbon calculation (e.g. GPU_BOARD_OPERATIONAL_CARBON)."
+    )
+    grid_intensity_gco2e_per_kwh: Optional[float] = Field(
+        default=None,
+        description="Configured grid emissions intensity factor (gCO2e/kWh) used for operational carbon calculation."
     )
     provenance: ProvenanceStatus = Field(
         default=ProvenanceStatus.UNAVAILABLE,
-        description="Status of environmental metrics"
+        description="Overall status of environmental metrics (MEASURED if physical energy measured, UNAVAILABLE if unmeasured)"
+    )
+    energy_provenance: ProvenanceStatus = Field(
+        default=ProvenanceStatus.UNAVAILABLE,
+        description="Provenance of energy metric: MEASURED, PROVIDER_REPORTED, or UNAVAILABLE"
+    )
+    carbon_provenance: ProvenanceStatus = Field(
+        default=ProvenanceStatus.UNAVAILABLE,
+        description="Provenance of carbon metric: ESTIMATED (if grid factor applied to measured energy), or UNAVAILABLE"
+    )
+    water_provenance: ProvenanceStatus = Field(
+        default=ProvenanceStatus.UNAVAILABLE,
+        description="Provenance of water metric: UNAVAILABLE (zero fabrication)"
     )
     gpu_telemetry: Optional[GpuTelemetry] = Field(
         default=None,
@@ -145,7 +183,7 @@ class EnvironmentalTelemetry(BaseModel):
         description="Capability response indicating which measurement sources are supported"
     )
     note: str = Field(
-        default="Physical environmental data is UNAVAILABLE for cloud APIs in Phase 5A. Local GPU energy is populated only when measured on-device.",
+        default="Physical environmental data is UNAVAILABLE for cloud APIs (zero fabrication). Local GPU energy is populated only when measured on-device.",
         description="Integrity disclosure"
     )
 
@@ -161,6 +199,43 @@ class TelemetryRecord(BaseModel):
     tokens: TokenTelemetry = Field(default_factory=TokenTelemetry)
     latency: LatencyTelemetry
     environment: EnvironmentalTelemetry = Field(default_factory=EnvironmentalTelemetry)
+    avoidance: Optional[AvoidanceTelemetry] = Field(default=None, description="Operational avoidance facts relative to baseline")
+
+class MetricSavings(BaseModel):
+    """Pair-wise savings container for a single resource metric."""
+    baseline_value: Optional[float] = Field(default=None, description="Baseline metric value")
+    selected_value: Optional[float] = Field(default=None, description="Selected route metric value")
+    savings_value: Optional[float] = Field(default=None, description="Calculated absolute savings: baseline - selected")
+    savings_pct: Optional[float] = Field(default=None, description="Percentage savings relative to baseline")
+    unit: str = Field(default="", description="Unit of measurement (J, Wh, mL, gCO2e, etc.)")
+    provenance: ProvenanceStatus = Field(default=ProvenanceStatus.UNAVAILABLE, description="Authentic provenance of savings")
+    scope: Optional[MeasurementScope] = Field(default=None, description="Measurement scope if both routes share identical scope")
+    note: str = Field(default="", description="Integrity note explaining calculation or why unavailable")
+
+class SavingsComparison(BaseModel):
+    """
+    Pair-wise comparison of resource consumption between a selected route and a baseline route.
+    Enforces the Non-Zero Rule: if either route is UNAVAILABLE, environmental savings are strictly UNAVAILABLE.
+    """
+    selected_route: str = Field(..., description="Route selected and executed")
+    baseline_route: str = Field(..., description="Explicit baseline route (e.g. large_model)")
+    quality_threshold_met: bool = Field(default=True, description="Whether the selected route met required quality")
+    
+    # Operational Fact Proxies
+    model_calls_avoided: int = Field(default=0, description="Model inference calls avoided (1 for tools/cache, 0 for models)")
+    tokens_saved: Optional[int] = Field(default=None, description="Baseline tokens - selected tokens (if both available)")
+    tokens_provenance: ProvenanceStatus = Field(default=ProvenanceStatus.UNAVAILABLE, description="Token savings provenance")
+    latency_delta_ms: Optional[float] = Field(default=None, description="Baseline execution time - selected execution time")
+    
+    # Environmental Savings (strictly enforced pair-wise non-zero rule)
+    energy_savings: MetricSavings = Field(default_factory=MetricSavings)
+    water_savings: MetricSavings = Field(default_factory=MetricSavings)
+    carbon_savings: MetricSavings = Field(default_factory=MetricSavings)
+    
+    notice: str = Field(
+        default="",
+        description="Integrity notice explaining available vs unavailable metrics"
+    )
 
 class TelemetrySummary(BaseModel):
     """Aggregated summary of recorded telemetry events."""
