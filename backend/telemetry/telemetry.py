@@ -363,7 +363,7 @@ class TelemetryCollector:
             )
 
         # 2. Cloud Inference Environmental Estimation (Phase 5B Upgrade)
-        enable_cloud_est = getattr(settings, "ENABLE_CLOUD_ENERGY_ESTIMATION", True)
+        enable_cloud_est = getattr(settings, "ENABLE_CLOUD_ENERGY_ESTIMATION", False)
         if enable_cloud_est and provider in ("groq", "google", "openai", "anthropic", "cloud") and model:
             p_in = tokens.input_tokens if (tokens and tokens.input_tokens is not None) else 0
             p_out = tokens.output_tokens if (tokens and tokens.output_tokens is not None) else 0

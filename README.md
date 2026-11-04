@@ -63,6 +63,7 @@ backend/
     ├── test_semantic_cache.py      # Unit tests for Precision-First Semantic Cache
     ├── test_telemetry.py           # Unit tests for Phase 5A measurement infrastructure
     ├── test_environmental_accounting.py # Unit tests for Phase 5B environmental accounting & Non-Zero Rule
+    ├── test_environmental_accounting_upgrade.py # Unit tests for Phase 5B upgrade (source registry, cloud estimators, grid & water)
     └── test_api.py                 # Integration tests for FastAPI endpoints
 frontend/                       # React 19 + Vite 8 + Tailwind CSS v4 dashboard
 ```
@@ -136,7 +137,7 @@ npm run dev
   - Preserved authentic on-device NVIDIA GPU power/energy sampling via direct NVML ctypes C-binding with `nvidia-smi` fallback and explicit limitation labeling.
   - Implemented architectural ingestion contracts for future native mobile clients (Android / Apple) without pretending the Python server directly reads remote phone hardware.
   - Added system capabilities introspection (`GET /telemetry/capabilities`) with graceful degradation: uses best real measurement source available, returns `null` + `UNAVAILABLE` otherwise, and never substitutes synthetic estimates.
-- **Phase 5B — Environmental Accounting & Savings Integrity**: Completed (129 tests passing, as reported by the test run).
+- **Phase 5B — Environmental Accounting & Savings Integrity**: Completed (156 tests passing, as reported by the test run).
 - Implemented strict environmental accounting: cloud energy, water, and carbon remain `UNAVAILABLE` when reliable per-request measurements are not available.
 - Added local NVIDIA GPU operational carbon calculation when a valid grid-intensity factor is configured, using measured GPU inference-window energy.
 - Preserved explicit measurement scope and provenance so measured values, estimates, and unavailable metrics are not confused.
