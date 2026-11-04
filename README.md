@@ -36,6 +36,10 @@ backend/
 │   ├── query_analyzer.py       # Heuristic task type & complexity analyzer
 │   ├── routing_policy.py       # Route policy & optimizer dispatcher
 │   └── optimizer.py            # Multi-Objective Routing Optimizer (Pareto + normalized scalar scoring)
+├── receipt/
+│   ├── __init__.py             # Eco Receipt module exports
+│   ├── schemas.py              # EcoReceipt, CostMetric, EnergyMetric, CarbonMetric, WaterMetric, OptimizerSummary
+│   └── receipt_generator.py    # Honest, explainable receipt generator with Non-Zero safeguards
 ├── telemetry/
 │   ├── __init__.py             # Telemetry module exports
 │   ├── schemas.py              # TelemetryRecord, ProvenanceStatus, GpuTelemetry, PhysicalMeasurement, SavingsComparison
@@ -69,6 +73,7 @@ backend/
     ├── test_environmental_accounting.py # Unit tests for Phase 5B environmental accounting & Non-Zero Rule
     ├── test_environmental_accounting_upgrade.py # Unit tests for Phase 5B upgrade (source registry, cloud estimators, grid & water)
     ├── test_optimizer.py           # Unit & integration tests for Phase 6 Multi-Objective Optimizer (17 tests)
+    ├── test_eco_receipt.py         # Unit & integration tests for Phase 7 Eco Receipt Generation (13 tests)
     └── test_api.py                 # Integration tests for FastAPI endpoints
 frontend/                       # React 19 + Vite 8 + Tailwind CSS v4 dashboard
 ```
@@ -157,6 +162,11 @@ npm run dev
   - **Normalized Scalarized Cost Scoring**: Computes composite cost $S(R) = w_Q \cdot \bar{Q}_{\text{deficit}} + w_L \cdot \bar{L} + w_{\$} \cdot \bar{\$} + w_E \cdot \bar{E}$ using configurable weights in `settings.py` ($w_Q=0.40, w_L=0.25, w_{\$}=0.20, w_E=0.15$).
   - **Dynamic Weight Renormalization (The Non-Zero Rule)**: Missing or unavailable metrics (e.g. unmeasured cloud energy) are explicitly flagged as `UNAVAILABLE` and their weights are dynamically redistributed across remaining verified objectives ($w'_i = w_i / \sum_{j \in \text{available}} w_j$). Unavailable metrics are never fabricated or treated as zero.
   - **Full Control Plane Integration**: Integrated into `/chat` request pipeline, `/router/config`, and `/router/optimize`. Emits granular `RoutingDecision` telemetry attached to response metadata and `TelemetryRecord`.
+- **Phase 7 — Eco Receipt Generation**: Completed and verified (186 tests passing).
+  - Designed and implemented structured, machine-readable `EcoReceipt` attached to every `/chat` completion and retrievable via `GET /receipts/{request_id}` and `GET /telemetry/receipt/{request_id}`.
+  - Itemizes operational latency, provider-reported token usage, defensible catalog monetary cost, and environmental impacts (energy in Joules/kWh, operational carbon in gCO2e, and water).
+  - Preserves strict integrity: missing metrics remain `null` and `UNAVAILABLE`; zero values are only reported when genuinely measured (0 tokens and $0.00 cost for deterministic tools and cache hits).
+  - Transparent explainability breakdown detailing why the route was selected, measured vs estimated metrics, unavailable metric justifications, and uncertainty/boundary limitations without claiming global optimality.
 
 ### End-to-End Execution & Telemetry Flow
 ```text
@@ -470,6 +480,64 @@ The missing objective is excluded from scalarization, and remaining weights are 
 
 ---
 
+## Phase 7: Eco Receipt Generation
+
+Phase 7 introduces structured, machine-readable **Eco Receipts** ([`backend/receipt/`](backend/receipt/)) attached to every completed request. The receipt translates authentic operational telemetry and multi-objective routing decisions into a transparent, defensible resource invoice.
+
+### 1. Receipt Anatomy & Schema
+
+```text
+EcoReceipt ([backend/receipt/schemas.py](backend/receipt/schemas.py))
+ ├── receipt_id: str ("rcpt_<uuid>")
+ ├── request_id: str (UUIDv4)
+ ├── timestamp: str (ISO-8601 UTC)
+ ├── status: str ("SUCCESS", "FAILED", "PARTIAL")
+ ├── execution_path: ExecutionPath ("deterministic_tool", "semantic_cache", "model_inference")
+ ├── route: str ("Calculator / Deterministic Tool", "semantic_cache", "Small Model (Groq)")
+ ├── provider: str ("deterministic", "cache", "groq", "google", "local")
+ ├── model: Optional[str]
+ ├── query_preview: Optional[str]
+ ├── execution_time_ms: float (Total control plane latency)
+ ├── inference_latency_ms: Optional[float]
+ ├── latency_provenance: ProvenanceStatus (MEASURED)
+ ├── tokens: TokenTelemetry
+ │    ├── prompt_tokens, completion_tokens, total_tokens
+ │    └── provenance: PROVIDER_REPORTED / MEASURED (0 for tools/cache)
+ ├── cost: CostMetric
+ │    ├── value_usd: Optional[float] ($0.00 for tools/cache/local; catalog rate for cloud)
+ │    ├── provenance: ProvenanceStatus (MEASURED for tools/cache/local, ESTIMATED for cloud)
+ │    └── pricing_source: str
+ ├── environment: EnvironmentalBreakdown
+ │    ├── energy: EnergyMetric (Joules, kWh, scope, provenance, platform, disclaimer)
+ │    ├── carbon: CarbonMetric (gCO2e, scope, provenance, grid intensity factor & source)
+ │    ├── water: WaterMetric (Liters, accounting scope, provenance: UNAVAILABLE)
+ │    ├── source_id & source_name (Registry citations)
+ │    ├── assumptions & uncertainty_info
+ │    └── unavailable_reasons: Dict[str, str]
+ ├── avoidance: Optional[AvoidanceSummary] (Calls & tokens avoided vs baseline)
+ ├── optimizer: Optional[OptimizerSummary] (Phase 6 candidate scores, weights, Pareto frontier)
+ └── explainability: ReceiptExplainability
+      ├── selection_summary: Explainable route choice based on query complexity
+      ├── measurement_vs_estimation: Explicit breakdown of measured vs estimated metrics
+      ├── unavailable_metrics_rationale: Transparent reasons for missing values
+      └── caveats_and_uncertainty: Scope limitations and non-optimality disclaimers
+```
+
+### 2. Strict Measurement Integrity Safeguards
+
+- **No Value Fabrication**: Unmetered metrics (cloud physical energy, water, uncalculated carbon) remain `null` with `ProvenanceStatus.UNAVAILABLE`; they are **never converted to zero**.
+- **Accurate Zeroes Only When Measured**: $0.00$ cost and $0$ tokens are reported only when verified (AST calculator, unit converter, semantic cache hits, local offline models).
+- **Measurement Boundary Scoping**: Local NVIDIA GPU power draw is explicitly labeled `"MEASURED GPU ENERGY (INFERENCE WINDOW ONLY - NOT TOTAL SYSTEM ENERGY)"`.
+- **Conditional Carbon Calculation**: Operational carbon is computed only when a valid regional grid carbon intensity ($> 0$) is active.
+- **Explainability without False Claims**: The selection policy is explained through the configured multi-objective optimizer weights and constraints, without claiming global optimality.
+
+### 3. Receipt API Endpoints
+
+* `GET /receipts/{request_id}`: Retrieve machine-readable Eco Receipt for any request ID.
+* `GET /telemetry/receipt/{request_id}`: Canonical telemetry alias for receipt retrieval.
+
+---
+
 ## Limitations & Project Roadmap
 
 ### Current Limitations
@@ -483,5 +551,6 @@ The missing objective is excluded from scalarization, and remaining weights are 
 * **Phase 5A**: Hardware-agnostic telemetry layer & NVIDIA GPU sampling (Complete & Verified).
 * **Phase 5B**: Environmental accounting methodology, versioned source registry & pluggable cloud estimation (Complete & Verified).
 * **Phase 6**: Multi-objective Pareto routing optimizer (Complete & Verified — 173 tests passing).
-* **Phase 7**: Comprehensive user-facing Eco Receipts (Upcoming).
+* **Phase 7**: Comprehensive user-facing Eco Receipts (Complete & Verified — 186 tests passing).
+* **Phase 8**: Sustainability Dashboard & Historical Aggregations (Upcoming).
 

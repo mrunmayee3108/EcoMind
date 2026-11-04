@@ -1,7 +1,7 @@
 # EcoMind — System Architecture Reference
 
 > **Comprehensive Architectural Specifications, Data Flow, and Request Traces**  
-> *Repository State: Phase 6 (Multi-Objective Routing Optimizer)*
+> *Repository State: Phase 7 (Eco Receipt Generation)*
 
 ---
 
@@ -53,7 +53,7 @@ User Query
                                        └──────────────────┬─────────────────────┘
                                                           │
                                                           ▼
-                                               Answer + Eco Receipt (Phase 7)
+                                               Answer + Eco Receipt (Phase 7: Itemized Invoice)
 ```
 
 ### Architecture Lifecycle & Phase Status
@@ -67,12 +67,13 @@ User Query
 | **Hardware Telemetry Layer** | Phase 5A | **Completed & Verified** | [`measurement.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/measurement.py), [`gpu.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/gpu.py), [`telemetry.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/telemetry.py) |
 | **Environmental Accounting & Registry** | Phase 5B | **Completed & Verified** | [`registry.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/registry.py), [`cloud_estimator.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/cloud_estimator.py), [`grid.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/grid.py), [`water.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/water.py), [`savings.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/savings.py), Non-Zero Rule, 156 tests |
 | **Multi-Objective Optimizer** | Phase 6 | **Completed & Verified** | [`optimizer.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/router/optimizer.py), [`routing_policy.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/router/routing_policy.py), [`routes_chat.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/routes_chat.py), Pareto filtering, dynamic weight renormalization, 173 tests |
-| **Eco Receipt Generation** | Phase 7 | Planned | Per-inference itemized environmental receipts |
-| **Benchmarking & Paper** | Phase 8–11 | Planned | Evaluation suite, ablation studies, and academic manuscript |
+| **Eco Receipt Generation** | Phase 7 | **Completed & Verified** | [`receipt/schemas.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/schemas.py), [`receipt_generator.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/receipt_generator.py), itemized resource invoices, explainability, 186 tests |
+| **Sustainability Dashboard** | Phase 8 | Planned | Aggregated longitudinal analytics & trend visualization |
+| **Benchmarking & Paper** | Phase 9–11 | Planned | Evaluation suite, ablation studies, and academic manuscript |
 
 ---
 
-## 2. Current Implemented Architecture (Phase 6 Actual)
+## 2. Current Implemented Architecture (Phase 7 Actual)
 
 The diagram below reflects the active control plane execution graph implemented across the backend:
 
@@ -606,13 +607,47 @@ RoutingDecision ([telemetry/schemas.py](file:///c:/Users/Mrunmayee%20Potdar/Desk
  └── fallback_reason: Optional[str]
 ```
 
+### 6.5 Eco Receipt Schemas (Phase 7)
+
+```text
+EcoReceipt ([backend/receipt/schemas.py](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/schemas.py))
+ ├── receipt_id: str ("rcpt_<uuid>")
+ ├── request_id: str (UUIDv4)
+ ├── timestamp: str (ISO-8601 UTC)
+ ├── status: str ("SUCCESS", "FAILED", "PARTIAL")
+ ├── execution_path: ExecutionPath ("deterministic_tool", "semantic_cache", "model_inference")
+ ├── route: str
+ ├── provider: str
+ ├── model: Optional[str]
+ ├── query_preview: Optional[str]
+ ├── execution_time_ms: float
+ ├── inference_latency_ms: Optional[float]
+ ├── latency_provenance: ProvenanceStatus (MEASURED)
+ ├── tokens: TokenTelemetry
+ ├── cost: CostMetric (USD, provenance, pricing source, details)
+ ├── environment: EnvironmentalBreakdown
+ │    ├── energy: EnergyMetric (Joules, kWh, scope, provenance, platform, disclaimer)
+ │    ├── carbon: CarbonMetric (gCO2e, scope, provenance, grid intensity factor & source)
+ │    ├── water: WaterMetric (Liters, accounting scope, provenance: UNAVAILABLE)
+ │    ├── source_id & source_name (Registry citations)
+ │    ├── assumptions & uncertainty_info
+ │    └── unavailable_reasons: Dict[str, str]
+ ├── avoidance: Optional[AvoidanceSummary]
+ ├── optimizer: Optional[OptimizerSummary] (Phase 6 candidate scores, weights, Pareto frontier)
+ └── explainability: ReceiptExplainability
+      ├── selection_summary: str
+      ├── measurement_vs_estimation: str
+      ├── unavailable_metrics_rationale: str
+      └── caveats_and_uncertainty: str
+```
+
 ---
 
 ## 7. Control Plane REST API Reference
 
 | Endpoint | Method | Input Schema | Output Schema | Architectural Role |
 |---|---|---|---|---|
-| `/chat` | `POST` | [`ChatRequest`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | [`ChatResponse`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | Central execution endpoint: evaluates tools, cache, and model dispatcher; records authentic telemetry. |
+| `/chat` | `POST` | [`ChatRequest`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | [`ChatResponse`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | Central execution endpoint: evaluates tools, cache, and model dispatcher; records authentic telemetry; attaches `EcoReceipt`. |
 | `/tools` | `GET` | *None* | `List[ToolInfoSchema]` | Introspects registered deterministic tools and their execution metadata. |
 | `/models` | `GET` | *None* | `List[ModelProfileSchema]` | Returns active model configurations and public pricing profiles. |
 | `/cache/stats` | `GET` | *None* | [`CacheStatsSchema`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | Introspects semantic cache hit rate, entries, evictions, and vector dimensions. |
@@ -628,3 +663,5 @@ RoutingDecision ([telemetry/schemas.py](file:///c:/Users/Mrunmayee%20Potdar/Desk
 | `/telemetry/clear` | `POST` | *None* | `Dict[str, Any]` | Flushes the in-memory telemetry buffer. |
 | `/router/config` | `GET` | *None* | [`RouterConfigResponse`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | Introspects active router weights ($w_Q, w_L, w_{\$}, w_E$), quality thresholds, and Pareto enablement status. |
 | `/router/optimize` | `POST` | [`RouteOptimizationRequest`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | [`RoutingDecision`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/schemas.py) | Standalone endpoint to simulate or invoke multi-objective routing optimization over arbitrary candidate sets. |
+| `/receipts/{request_id}` | `GET` | *Path Parameter* | [`EcoReceipt`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/schemas.py) | Retrieves machine-readable Eco Receipt for any completed or failed request ID. |
+| `/telemetry/receipt/{request_id}` | `GET` | *Path Parameter* | [`EcoReceipt`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/schemas.py) | Canonical telemetry alias for retrieving an Eco Receipt. |

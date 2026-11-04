@@ -35,6 +35,7 @@ from telemetry.schemas import (
 from telemetry.savings import calculate_savings
 from telemetry.registry import source_registry, source_validation_service
 from telemetry.grid import grid_manager
+from receipt import generate_eco_receipt, EcoReceipt
 
 router = APIRouter()
 
@@ -114,6 +115,17 @@ async def chat_endpoint(request: ChatRequest):
                     token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0, is_estimated=False),
                     routing_decision=tool_decision
                 )
+                receipt = generate_eco_receipt(telemetry_rec, query=query)
+                tool_metadata = {
+                    "tool_used": candidate_tool.name,
+                    "tool_metadata": tool_result.metadata,
+                    "tool_execution_ms": tool_result.execution_time_ms,
+                    "complexity": "deterministic",
+                    "reasoning": f"Deterministic {candidate_tool.name} solved without neural network inference.",
+                    "routing_decision": tool_decision.model_dump(),
+                    "decision_rationale": tool_decision.decision_rationale,
+                    "eco_receipt": receipt.model_dump()
+                }
                 return ChatResponse(
                     query=query,
                     answer=str(tool_result.result),
@@ -130,16 +142,9 @@ async def chat_endpoint(request: ChatRequest):
                     large_model_avoided=True,
                     cache_status="not_checked",
                     cache_similarity=None,
-                    metadata={
-                        "tool_used": candidate_tool.name,
-                        "tool_metadata": tool_result.metadata,
-                        "tool_execution_ms": tool_result.execution_time_ms,
-                        "complexity": "deterministic",
-                        "reasoning": f"Deterministic {candidate_tool.name} solved without neural network inference.",
-                        "routing_decision": tool_decision.model_dump(),
-                        "decision_rationale": tool_decision.decision_rationale
-                    },
-                    telemetry=telemetry_rec
+                    metadata=tool_metadata,
+                    telemetry=telemetry_rec,
+                    eco_receipt=receipt
                 )
             elif route_pref == "deterministic_tool":
                 telemetry_collector.record_failure(
@@ -194,6 +199,20 @@ async def chat_endpoint(request: ChatRequest):
                 token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0, is_estimated=False),
                 routing_decision=cache_decision
             )
+            receipt = generate_eco_receipt(telemetry_rec, query=query)
+            cache_metadata = {
+                "cache_status": "hit",
+                "cache_similarity": cache_similarity,
+                "cached_query": cached.query,
+                "hit_count": cached.hit_count,
+                "task_type": cached.task_type,
+                "original_provider": cached.provider,
+                "original_model": cached.model,
+                "reasoning": "Answer reused from precision-first semantic cache with verified compatibility; 0 model inference calls.",
+                "routing_decision": cache_decision.model_dump(),
+                "decision_rationale": cache_decision.decision_rationale,
+                "eco_receipt": receipt.model_dump()
+            }
             return ChatResponse(
                 query=query,
                 answer=cached.answer,
@@ -210,19 +229,9 @@ async def chat_endpoint(request: ChatRequest):
                 large_model_avoided=True,
                 cache_status="hit",
                 cache_similarity=cache_similarity,
-                metadata={
-                    "cache_status": "hit",
-                    "cache_similarity": cache_similarity,
-                    "cached_query": cached.query,
-                    "hit_count": cached.hit_count,
-                    "task_type": cached.task_type,
-                    "original_provider": cached.provider,
-                    "original_model": cached.model,
-                    "reasoning": "Answer reused from precision-first semantic cache with verified compatibility; 0 model inference calls.",
-                    "routing_decision": cache_decision.model_dump(),
-                    "decision_rationale": cache_decision.decision_rationale
-                },
-                telemetry=telemetry_rec
+                metadata=cache_metadata,
+                telemetry=telemetry_rec,
+                eco_receipt=receipt
             )
         else:
             cache_status = "miss"
@@ -339,6 +348,9 @@ async def chat_endpoint(request: ChatRequest):
             routing_decision=routing_decision
         )
 
+        receipt = generate_eco_receipt(telemetry_rec, query=query)
+        metadata["eco_receipt"] = receipt.model_dump()
+
         return ChatResponse(
             query=query,
             answer=resp.content,
@@ -351,7 +363,8 @@ async def chat_endpoint(request: ChatRequest):
             cache_status=cache_status,
             cache_similarity=cache_similarity,
             metadata=metadata,
-            telemetry=telemetry_rec
+            telemetry=telemetry_rec,
+            eco_receipt=receipt
         )
     except ProviderUnavailableError as pue:
         telemetry_collector.record_failure(
@@ -490,5 +503,21 @@ def preview_routing_optimization(request: RoutePreviewRequest):
         analysis=analysis,
         candidate_tool_name=tool_name
     )
+
+@router.get("/receipts/{request_id}", response_model=EcoReceipt)
+@router.get("/telemetry/receipt/{request_id}", response_model=EcoReceipt)
+def get_receipt_by_id(request_id: str):
+    """
+    Retrieve or reconstruct a machine-readable Eco Receipt for any completed or failed request ID.
+    Leverages recorded telemetry without triggering model inference.
+    """
+    rec = telemetry_collector.get_record(request_id)
+    if not rec:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No telemetry record found for request ID '{request_id}'."
+        )
+    return generate_eco_receipt(rec)
+
 
 

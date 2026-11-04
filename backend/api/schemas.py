@@ -24,6 +24,7 @@ from telemetry.schemas import (
     RoutingDecision,
     CandidateScore
 )
+from receipt.schemas import EcoReceipt
 
 class RouterConfigSchema(BaseModel):
     weight_quality: float
@@ -56,6 +57,7 @@ class ChatResponse(BaseModel):
     cache_similarity: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
     telemetry: Optional[TelemetryRecord] = None
+    eco_receipt: Optional[EcoReceipt] = None
 
 class CacheStatsSchema(BaseModel):
     enabled: bool
