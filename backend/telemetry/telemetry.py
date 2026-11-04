@@ -14,6 +14,7 @@ from .schemas import (
     GpuTelemetry,
     EnvironmentalTelemetry,
     AvoidanceTelemetry,
+    RoutingDecision,
     TelemetryRecord,
     TelemetrySummary
 )
@@ -54,7 +55,8 @@ class TelemetryCollector:
         physical_measurement: Optional[Union[PhysicalMeasurement, Dict[str, Any]]] = None,
         gpu_telemetry: Optional[Union[GpuTelemetry, Dict[str, Any]]] = None,
         request_id: Optional[str] = None,
-        avoidance: Optional[AvoidanceTelemetry] = None
+        avoidance: Optional[AvoidanceTelemetry] = None,
+        routing_decision: Optional[Union[RoutingDecision, Dict[str, Any]]] = None
     ) -> TelemetryRecord:
         """Record telemetry for a successfully executed control plane query."""
         req_id = request_id or str(uuid.uuid4())
@@ -89,6 +91,14 @@ class TelemetryCollector:
                 reasoning=f"Satisfied via {provider} without neural network inference."
             )
 
+        # Convert dict routing_decision if necessary
+        dec_obj = None
+        if routing_decision is not None:
+            if isinstance(routing_decision, dict):
+                dec_obj = RoutingDecision(**routing_decision)
+            elif isinstance(routing_decision, RoutingDecision):
+                dec_obj = routing_decision
+
         record = TelemetryRecord(
             request_id=req_id,
             timestamp=ts,
@@ -100,7 +110,8 @@ class TelemetryCollector:
             tokens=tokens,
             latency=latency,
             environment=env,
-            avoidance=avoidance
+            avoidance=avoidance,
+            routing_decision=dec_obj
         )
 
         with self._lock:

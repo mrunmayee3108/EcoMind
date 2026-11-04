@@ -20,8 +20,23 @@ from telemetry.schemas import (
     SavingsComparison,
     EnvironmentalSource,
     SourceCheckResult,
-    GridIntensityRecord
+    GridIntensityRecord,
+    RoutingDecision,
+    CandidateScore
 )
+
+class RouterConfigSchema(BaseModel):
+    weight_quality: float
+    weight_latency: float
+    weight_cost: float
+    weight_environment: float
+    quality_threshold_high: float
+    quality_threshold_medium: float
+    quality_threshold_low: float
+    pareto_enabled: bool
+
+class RoutePreviewRequest(BaseModel):
+    query: str = Field(..., description="Query to analyze and optimize routing for without executing model inference")
 
 class SavingsCompareRequest(BaseModel):
     selected_request_id: str = Field(..., description="Request ID of the executed route to evaluate")

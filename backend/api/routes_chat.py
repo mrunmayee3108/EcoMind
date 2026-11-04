@@ -9,10 +9,12 @@ from .schemas import (
     ToolInfoSchema,
     ModelProfileSchema,
     CacheStatsSchema,
-    SavingsCompareRequest
+    SavingsCompareRequest,
+    RouterConfigSchema,
+    RoutePreviewRequest
 )
 from tools.tool_registry import tool_registry
-from router.query_analyzer import QueryAnalyzer
+from router.query_analyzer import QueryAnalyzer, QueryAnalysis
 from router.routing_policy import RoutingPolicy
 from models.dispatcher import model_dispatcher, ProviderUnavailableError
 from models.model_profiles import list_all_profiles
@@ -26,7 +28,9 @@ from telemetry.schemas import (
     SavingsComparison,
     EnvironmentalSource,
     SourceCheckResult,
-    GridIntensityRecord
+    GridIntensityRecord,
+    RoutingDecision,
+    CandidateScore
 )
 from telemetry.savings import calculate_savings
 from telemetry.registry import source_registry, source_validation_service
@@ -90,13 +94,25 @@ async def chat_endpoint(request: ChatRequest):
                     if candidate_tool.name == "calculator"
                     else f"{candidate_tool.name.capitalize()} / Deterministic Tool"
                 )
+                tool_decision = routing_policy.optimize_route(
+                    query=query,
+                    analysis=QueryAnalysis(
+                        task_type=candidate_tool.name,
+                        complexity="low",
+                        requires_tool=True,
+                        requires_reasoning=False,
+                        candidate_tool=candidate_tool.name
+                    ),
+                    candidate_tool_name=candidate_tool.name
+                )
                 telemetry_rec = telemetry_collector.record_success(
                     route=route_label,
                     provider="deterministic",
                     model="None",
                     execution_time_ms=total_latency,
                     inference_latency_ms=tool_result.execution_time_ms,
-                    token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0, is_estimated=False)
+                    token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0, is_estimated=False),
+                    routing_decision=tool_decision
                 )
                 return ChatResponse(
                     query=query,
@@ -119,7 +135,9 @@ async def chat_endpoint(request: ChatRequest):
                         "tool_metadata": tool_result.metadata,
                         "tool_execution_ms": tool_result.execution_time_ms,
                         "complexity": "deterministic",
-                        "reasoning": f"Deterministic {candidate_tool.name} solved without neural network inference."
+                        "reasoning": f"Deterministic {candidate_tool.name} solved without neural network inference.",
+                        "routing_decision": tool_decision.model_dump(),
+                        "decision_rationale": tool_decision.decision_rationale
                     },
                     telemetry=telemetry_rec
                 )
@@ -157,13 +175,24 @@ async def chat_endpoint(request: ChatRequest):
         if cache_result.status == "hit" and cache_result.entry:
             total_latency = (time.perf_counter() - start_time) * 1000
             cached = cache_result.entry
+            cache_decision = routing_policy.optimize_route(
+                query=query,
+                analysis=QueryAnalysis(
+                    task_type=cached.task_type or "general_qa",
+                    complexity="low",
+                    requires_tool=False,
+                    requires_reasoning=False
+                ),
+                cache_hit_entry=cached
+            )
             telemetry_rec = telemetry_collector.record_success(
                 route="semantic_cache",
                 provider="cache",
                 model=None,
                 execution_time_ms=total_latency,
                 inference_latency_ms=0.0,
-                token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0, is_estimated=False)
+                token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0, is_estimated=False),
+                routing_decision=cache_decision
             )
             return ChatResponse(
                 query=query,
@@ -189,7 +218,9 @@ async def chat_endpoint(request: ChatRequest):
                     "task_type": cached.task_type,
                     "original_provider": cached.provider,
                     "original_model": cached.model,
-                    "reasoning": "Answer reused from precision-first semantic cache with verified compatibility; 0 model inference calls."
+                    "reasoning": "Answer reused from precision-first semantic cache with verified compatibility; 0 model inference calls.",
+                    "routing_decision": cache_decision.model_dump(),
+                    "decision_rationale": cache_decision.decision_rationale
                 },
                 telemetry=telemetry_rec
             )
@@ -207,19 +238,21 @@ async def chat_endpoint(request: ChatRequest):
                     detail="Cache miss: no compatible cached response found."
                 )
 
-    # Step 3: Determine Logical Model Tier via QueryAnalyzer & RoutingPolicy
+    # Step 3: Determine Logical Model Tier via QueryAnalyzer & RoutingPolicy (Multi-Objective Optimization)
     analysis = None
+    routing_decision = None
     if route_pref in ("small_model", "medium_model", "large_model"):
         # Explicit user override
         tier = route_pref.replace("_model", "")
     elif route_pref == "auto":
-        # Dynamic, provider-agnostic routing
+        # Dynamic, provider-agnostic multi-objective Pareto routing
         analysis = query_analyzer.analyze(query)
-        raw_route = routing_policy.select_route(analysis)
-        if raw_route in ("small", "medium", "large"):
-            tier = raw_route
+        routing_decision = routing_policy.optimize_route(query=query, analysis=analysis)
+        if routing_decision.selected_tier in ("small", "medium", "large"):
+            tier = routing_decision.selected_tier
         else:
-            tier = "small"
+            raw_route = routing_policy.select_route(analysis)
+            tier = raw_route if raw_route in ("small", "medium", "large") else "small"
     else:
         telemetry_collector.record_failure(
             route=request.preferred_route or "invalid",
@@ -286,6 +319,11 @@ async def chat_endpoint(request: ChatRequest):
                 "complexity": analysis.complexity,
                 "requires_reasoning": analysis.requires_reasoning
             })
+        if routing_decision:
+            metadata.update({
+                "routing_decision": routing_decision.model_dump(),
+                "decision_rationale": routing_decision.decision_rationale
+            })
 
         phys_meta = resp.raw_metadata.get("physical_measurement") if resp.raw_metadata else None
         gpu_meta = resp.raw_metadata.get("gpu_telemetry") if resp.raw_metadata else None
@@ -297,7 +335,8 @@ async def chat_endpoint(request: ChatRequest):
             inference_latency_ms=resp.latency_ms,
             token_usage=resp.usage,
             physical_measurement=phys_meta,
-            gpu_telemetry=gpu_meta
+            gpu_telemetry=gpu_meta,
+            routing_decision=routing_decision
         )
 
         return ChatResponse(
@@ -421,5 +460,35 @@ def get_current_grid_intensity(region: Optional[str] = None):
     provenance, and live vs static status.
     """
     return grid_manager.get_intensity(region=region)
+
+@router.get("/router/config", response_model=RouterConfigSchema)
+def get_router_config():
+    """Inspect current multi-objective optimizer weights, quality thresholds, and Pareto settings."""
+    from config.settings import settings
+    return RouterConfigSchema(
+        weight_quality=routing_policy.optimizer.w_quality,
+        weight_latency=routing_policy.optimizer.w_latency,
+        weight_cost=routing_policy.optimizer.w_cost,
+        weight_environment=routing_policy.optimizer.w_environment,
+        quality_threshold_high=getattr(settings, "ROUTER_QUALITY_THRESHOLD_HIGH", 0.80),
+        quality_threshold_medium=getattr(settings, "ROUTER_QUALITY_THRESHOLD_MEDIUM", 0.65),
+        quality_threshold_low=getattr(settings, "ROUTER_QUALITY_THRESHOLD_LOW", 0.50),
+        pareto_enabled=routing_policy.optimizer.pareto_enabled
+    )
+
+@router.post("/router/optimize", response_model=RoutingDecision)
+def preview_routing_optimization(request: RoutePreviewRequest):
+    """
+    Preview multi-objective routing optimization for a query without executing LLM inference.
+    Returns evaluated candidate routes, Pareto frontier, quality constraints, and rationale.
+    """
+    analysis = query_analyzer.analyze(request.query)
+    candidate_tool = tool_registry.find_candidate_tool(request.query)
+    tool_name = candidate_tool.name if candidate_tool else None
+    return routing_policy.optimize_route(
+        query=request.query,
+        analysis=analysis,
+        candidate_tool_name=tool_name
+    )
 
 

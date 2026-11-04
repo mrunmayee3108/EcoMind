@@ -2,7 +2,7 @@
 
 > **Concise Engineering Reference & System Knowledge**  
 > *Target Audience: Project Owner & AI Coding Assistants*  
-> *Current Status: Phase 5B Completed & Verified (Environmental Accounting Methodology, Versioned Source Registry & Pluggable Estimators)*  
+> *Current Status: Phase 6 Completed & Verified (Multi-Objective Routing Optimizer, Pareto Frontier & Normalized Scalarized Cost Selection)*  
 > *Detailed System Diagrams & Execution Traces: see [ARCHITECTURE.md](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/ARCHITECTURE.md)*
 
 ---
@@ -40,7 +40,7 @@ Similarly, for **"convert 100 km to miles"**:
 | **Phase 4** | Semantic Cache & Lifecycle Controls | Completed | **Yes** | SentenceTransformers (`all-MiniLM-L6-v2`), FAISS vector index, SQLite metadata store, LRU & TTL eviction, Stage 2 conservative `CompatibilityChecker`, 97 tests |
 | **Phase 5A** | Hardware-Agnostic Telemetry & Measurement | Completed | **Yes** | Generic `MeasurementProvider` abstraction (`NvidiaNvmlProvider`, `AndroidEnergyProvider`, `AppleEnergyProvider`, `UnavailableProvider`), explicit scopes, capabilities API, 117 tests |
 | **Phase 5B** | Environmental Accounting Methodology & Upgrade | Completed | **Yes** | Multi-provider accounting, Versioned Source Registry (`registry.py`), Pluggable Cloud Energy Estimators (`cloud_estimator.py`), Ember 2024 Grid Manager (`grid.py`), 4-category Water Engine (`water.py`), Non-Zero Savings Rule (`savings.py`), 156 tests |
-| **Phase 6** | Multi-Objective Optimizer | Planned | **No** | Normalized Pareto cost optimization over quality, latency, carbon, cost |
+| **Phase 6** | Multi-Objective Optimizer | Completed | **Yes** | Normalized Pareto cost optimization over quality, latency, cost, and energy; Non-Zero dynamic weight renormalization; hard quality constraints; live `/chat` integration, 173 tests |
 | **Phase 7** | Eco Receipt | Planned | **No** | Itemized environmental invoice for each inference request |
 | **Phase 8** | Sustainability Dashboard | Planned | **No** | Long-term analytics, carbon-avoidance visualization |
 | **Phase 9** | Research Benchmark | Planned | **No** | 500-query evaluation suite (EcoMind-Router-500) |
@@ -72,7 +72,8 @@ backend/
 │   └── tool_registry.py        # Central tool catalog and query candidate matcher
 ├── router/
 │   ├── query_analyzer.py       # QueryAnalysis dataclass and heuristic task classification (7 categories)
-│   └── routing_policy.py       # Route selection prioritizing deterministic tools before logical model tiers
+│   ├── routing_policy.py       # Route selection prioritizing deterministic tools before logical model tiers
+│   └── optimizer.py            # Multi-Objective Routing Optimizer (Pareto dominance + normalized scalar cost)
 ├── models/
 │   ├── provider.py             # Abstract ModelProvider, ProviderResponse, TokenUsage
 │   ├── groq_provider.py        # Groq LPU provider using official Groq SDK with usage tracking
@@ -93,7 +94,7 @@ backend/
 │   └── telemetry.py            # Central thread-safe TelemetryCollector integrating hardware, cloud estimators, grid & water engines
 ├── config/
 │   └── settings.py             # Pydantic BaseSettings loading from .env
-└── tests/                      # 156 passing unit & integration tests
+└── tests/                      # 173 passing unit & integration tests
     ├── test_calculator.py          # Calculator arithmetic & security tests
     ├── test_unit_converter.py      # UnitConverter conversions, dimensions & edge cases
     ├── test_datetime_calculator.py  # DateTimeCalculator differences, offsets, weekdays
@@ -108,7 +109,8 @@ backend/
     ├── test_semantic_cache.py      # Comprehensive Phase 4 semantic cache & regression tests (16 tests)
     ├── test_telemetry.py           # Comprehensive Phase 5A measurement architecture tests (15 tests)
     ├── test_environmental_accounting.py # Phase 5B multi-provider accounting & Non-Zero Rule tests (12 tests)
-    └── test_environmental_accounting_upgrade.py # Phase 5B Upgrade source registry, cloud estimators, grid & water tests (27 tests)
+    ├── test_environmental_accounting_upgrade.py # Phase 5B Upgrade source registry, cloud estimators, grid & water tests (27 tests)
+    └── test_optimizer.py           # Phase 6 Multi-Objective Optimizer & Pareto tests (17 tests)
 frontend/
 ├── src/App.tsx                 # Interactive Control Plane console with Phase 4 cache & telemetry UI
 └── package.json                # React 19, Vite, Tailwind CSS v4, Lucide React
@@ -208,14 +210,79 @@ frontend/
 - Safeguard water metrics across 4 discrete scopes (direct evaporative, indirect power, supply chain, total lifecycle) and preserve anti-fabrication standards.
 - Compute pair-wise savings comparisons via `POST /telemetry/savings/compare`, enforcing the Non-Zero Rule, comparison types, and quality degradation penalties.
 
-### What It CANNOT Do Yet (Future Phases)
-- Run automated multi-objective Pareto optimization across latency, quality, cost, and energy (Phase 6).
-- Generate itemized user-facing Eco Receipts (Phase 7).
-- Render long-term historical sustainability trends and visual dashboards (Phase 8).
+### Phase 5B: Environmental Accounting Methodology & Upgrade (Completed & Live Integrated)
+1. **Multi-Provider Accounting**:
+   - Explicit `UNAVAILABLE` status for cloud providers without per-request energy telemetry.
+   - On-device NVIDIA GPU power scoped to `GPU_INFERENCE_WINDOW`.
+   - Local GPU-board operational carbon conditioned on positive `LOCAL_GRID_INTENSITY_GCO2E_PER_KWH`.
+2. **Versioned Source Registry & Freshness Audits**:
+   - Tracks empirical citations (ML.ENERGY v3.0, EcoLogits 2024, Elsworth et al. 2025 TPU v5e, Ember 2024, Electricity Maps) with SHA-256 integrity checks.
+3. **Pluggable Cloud Energy Estimators**:
+   - `MLEnergyEstimator` and `EcoLogitsEstimator` gated by `ENABLE_CLOUD_ENERGY_ESTIMATION`.
+4. **Regional Grid & 4-Category Water Safeguards**:
+   - Dynamic grid adapter with Ember Climate 2024 fallback.
+   - Discrete water scopes: Scope 1 direct, Scope 2 indirect, Scope 3 embodied, and lifecycle water.
+5. **The Non-Zero Rule for Pair-Wise Savings**:
+   - Unavailable values are never treated as zero; proxy differences ($\Delta \text{Calls}, \Delta \text{Tokens}, \Delta \text{Latency}$) are reported alongside integrity notices.
+
+### Phase 6: Multi-Objective Routing Optimizer (Completed & Live Integrated)
+1. **Four Fundamental Objectives**:
+   - Answer Quality ($Q$), Expected Latency ($L$), Estimated Cost ($\$$), and Environmental Impact ($E$).
+2. **Strict Quality First (Hard Constraints)**:
+   - Evaluates required quality threshold ($Q \ge Q_{\text{req}}$) based on complexity (`high` $\to 0.80$, `medium` $\to 0.65$, `low` $\to 0.50$).
+   - Prunes candidates failing the threshold; required answer quality is never compromised to save resources.
+3. **Pareto Dominance Filtering**:
+   - Evaluates multi-dimensional dominance among eligible candidates; isolates non-dominated candidates on the Pareto frontier.
+4. **Normalized Scalarized Cost Scoring**:
+   - Absolute quality deficit: $\bar{Q}_{\text{deficit}} = 1.0 - Q$.
+   - Normalized metrics for latency, cost, and energy.
+   - Composite score: $S(R) = w_Q \cdot \bar{Q}_{\text{deficit}} + w_L \cdot \bar{L} + w_{\$} \cdot \bar{\$} + w_E \cdot \bar{E}$ with configurable weights in `settings.py`.
+5. **Dynamic Weight Renormalization (The Non-Zero Rule)**:
+   - When environmental impact or cost is `UNAVAILABLE`, its weight is removed and remaining weights are proportionally renormalized ($w'_i = w_i / \sum_{j \in \text{Available}} w_j$). Missing values are never fabricated or treated as zero.
+6. **Execution Pipeline Integration**:
+   - Integrated into `/chat`, `/router/config`, and `/router/optimize`. Emits granular `RoutingDecision` telemetry attached to response metadata and `TelemetryRecord`.
 
 ---
 
-## 7. Why Phase 6 Is Next
+## 6. What EcoMind Can and Cannot Do Right Now
 
-With deterministic tools (Phase 3), accuracy-first semantic cache (Phase 4), hardware-agnostic physical measurement (Phase 5A), and fresh, auditable environmental accounting with pluggable cloud estimators and pair-wise savings (Phase 5B) fully in place, the system has complete ground-truth and scientifically backed telemetry across all execution routes. The control plane is now fully equipped to implement the **Multi-Objective Optimizer (Phase 6)** to mathematically balance quality ($Q \ge Q_{\text{req}}$), latency ($\bar{L}$), monetary cost ($\bar{\$}$), and environmental impacts ($\bar{E}$, $\bar{C}$, $\bar{W}$).
+### What It CAN Do Now
+- Instantly evaluate arithmetic expressions via AST in $< 1 \text{ ms}$ with **0 tokens** and **0 LLM calls**.
+- Instantly convert length, mass, and temperature units deterministically with **0 tokens** and **0 LLM calls**.
+- Instantly compute date differences, offsets, weekdays, and leap-year queries in $< 0.1 \text{ ms}$ with **0 tokens** and **0 LLM calls**.
+- Instantly calculate descriptive statistics (mean, median, min, max, standard deviation) over numeric lists with **0 tokens** and **0 LLM calls**.
+- Instantly compute word count, character count, sentence count, and frequency distributions over text with **0 tokens** and **0 LLM calls**.
+- Prioritize deterministic tools before cache lookup or model routing.
+- Conservatively reuse previous model answers via two-stage Semantic Cache for equivalent queries with **0 tokens** and **0 model calls**.
+- Reject false cache hits when queries add constraints, temporal modifiers, different entities, or require deeper reasoning.
+- Prevent caching of dynamic or time-sensitive queries to eliminate stale answer risks.
+- Classify queries into 7 task categories via `QueryAnalyzer` and route to deterministic tools or logical model tiers (`small`, `medium`, `large`) via `RoutingPolicy`.
+- Dynamically resolve logical tiers to configured providers (`GroqProvider`, `GeminiProvider`, `LocalProvider` / Ollama) via `ModelDispatcher`.
+- Extract and display authentic token counts, measured latency, and cache telemetry in the React frontend.
+- Measure live physical GPU energy on NVIDIA hardware via NVML during local inference windows with explicit limitation labeling.
+- Decouple telemetry collection from vendor-specific code via generic `MeasurementProvider` abstraction.
+- Enforce explicit measurement scopes (`GPU_INFERENCE_WINDOW`, `DEVICE`, `SYSTEM`, `CLOUD_INFERENCE`, `UNKNOWN`) so energy measurements are never ambiguously conflated.
+- Introspect physical measurement capabilities via `GET /telemetry/capabilities`.
+- Ingest client device telemetry via `AndroidEnergyProvider` and `AppleEnergyProvider` interfaces without pretending the backend accesses remote phones directly.
+- Support manual execution path directives (`auto`, `deterministic_tool`, `semantic_cache`, `small_model`, `medium_model`, `large_model`).
+- Introspect registered tools (`GET /tools`), model profiles (`GET /models`), cache statistics (`GET /cache/stats`), and telemetry (`GET /telemetry/summary`, `GET /telemetry/recent`, `GET /telemetry/capabilities`).
+- Audit versioned environmental accounting sources, citations, and freshness statuses via `GET /telemetry/sources` and `GET /telemetry/sources/{id}`.
+- Trigger automatic freshness audits via `POST /telemetry/sources/refresh`.
+- Estimate cloud energy via pluggable estimators (`MLEnergyEstimator` empirical v3.0, `EcoLogitsEstimator` LCA model) when `ENABLE_CLOUD_ENERGY_ESTIMATION=True`.
+- Dynamically manage grid carbon intensity across regional grids (Ember Climate 2024 fallbacks for US, US-CA, IN, DE, FR, UK, EU, GLOBAL) via `GET /telemetry/grid`.
+- Safeguard water metrics across 4 discrete scopes (direct evaporative, indirect power, supply chain, total lifecycle) and preserve anti-fabrication standards.
+- Compute pair-wise savings comparisons via `POST /telemetry/savings/compare`, enforcing the Non-Zero Rule, comparison types, and quality degradation penalties.
+- Run automated multi-objective Pareto optimization across quality ($Q$), latency ($L$), cost ($\$$), and environmental impact ($E$) with dynamic weight renormalization via `POST /router/optimize` and `/chat`.
+- Introspect router configurations, weights, and thresholds via `GET /router/config`.
+
+### What It CANNOT Do Yet (Future Phases)
+- Generate itemized user-facing Eco Receipts (Phase 7).
+- Render long-term historical sustainability trends and visual dashboards (Phase 8).
+- Run evaluation suites over the 500-query research benchmark (Phase 9).
+
+---
+
+## 7. Why Phase 7 Is Next
+
+With deterministic tools (Phase 3), accuracy-first semantic cache (Phase 4), hardware-agnostic physical measurement (Phase 5A), auditable environmental accounting (Phase 5B), and the multi-objective Pareto routing optimizer (Phase 6) fully operational, every inference request now possesses complete, verified telemetry including candidates, decision rationale, authentic token counts, measured latencies, and environmental metrics. The next logical phase is **Phase 7: Eco Receipt Generation**, translating this rich decision and accounting telemetry into itemized, user-facing environmental invoices that make AI resource consumption transparent to end-users.
 

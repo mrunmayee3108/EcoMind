@@ -309,6 +309,34 @@ class EnvironmentalTelemetry(BaseModel):
         description="Integrity disclosure"
     )
 
+class CandidateScore(BaseModel):
+    """Evaluation metrics and multi-objective scores for an eligible routing candidate."""
+    route_name: str = Field(..., description="Name of candidate route (e.g. 'tool:calculator', 'small', 'medium', 'large')")
+    tier: Optional[str] = Field(default=None, description="Logical model tier if applicable")
+    provider: str = Field(..., description="Provider name")
+    model: Optional[str] = Field(default=None, description="Model identifier")
+    quality_score: float = Field(..., description="Estimated task suitability/quality score in [0.0, 1.0]")
+    expected_latency_ms: float = Field(..., description="Estimated or benchmarked latency in milliseconds")
+    estimated_cost_usd: float = Field(..., description="Estimated inference cost in USD for query and estimated completion")
+    energy_joules: Optional[float] = Field(default=None, description="Estimated/measured energy in Joules if defensibly available")
+    energy_provenance: ProvenanceStatus = Field(default=ProvenanceStatus.UNAVAILABLE, description="Provenance of energy figure")
+    is_hard_constraint_met: bool = Field(default=True, description="Whether route satisfies minimum quality threshold and compatibility")
+    is_pareto_optimal: bool = Field(default=True, description="Whether route is on the Pareto-optimal frontier")
+    scalarized_score: Optional[float] = Field(default=None, description="Composite weighted cost score (lower is better)")
+    rejection_reason: Optional[str] = Field(default=None, description="Reason if filtered out by hard constraints")
+
+class RoutingDecision(BaseModel):
+    """Detailed record of a multi-objective routing optimization decision."""
+    selected_route: str = Field(..., description="Route selected by the optimizer")
+    selected_tier: Optional[str] = Field(default=None, description="Selected logical tier ('small', 'medium', 'large') if model")
+    decision_rationale: str = Field(..., description="Explainable justification for why this route was selected")
+    objective_weights: Dict[str, float] = Field(default_factory=dict, description="Active weights applied across objectives")
+    quality_threshold: float = Field(..., description="Minimum quality threshold Q_req enforced for this query")
+    hard_constraints_passed: List[str] = Field(default_factory=list, description="Candidate routes that satisfied all hard constraints")
+    pareto_frontier: List[str] = Field(default_factory=list, description="Non-dominated candidates on the Pareto frontier")
+    candidates: List[CandidateScore] = Field(default_factory=list, description="Complete evaluation breakdown for all candidates")
+    fallback_reason: Optional[str] = Field(default=None, description="Explanation if weights or fallback policy were engaged")
+
 class TelemetryRecord(BaseModel):
     """Comprehensive telemetry record for a single control plane request."""
     request_id: str = Field(..., description="Unique identifier for the request")
@@ -322,6 +350,7 @@ class TelemetryRecord(BaseModel):
     latency: LatencyTelemetry
     environment: EnvironmentalTelemetry = Field(default_factory=EnvironmentalTelemetry)
     avoidance: Optional[AvoidanceTelemetry] = Field(default=None, description="Operational avoidance facts relative to baseline")
+    routing_decision: Optional[RoutingDecision] = Field(default=None, description="Multi-objective optimizer decision details if optimized")
 
 class MetricSavings(BaseModel):
     """Pair-wise savings container for a single resource metric."""

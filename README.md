@@ -32,6 +32,10 @@ backend/
 │   ├── groq_provider.py        # Groq LPU provider with authentic token usage
 │   ├── local_provider.py       # Ollama integration with generic measurement provider sampling
 │   └── model_profiles.py       # Catalog for small, medium, large tiers
+├── router/
+│   ├── query_analyzer.py       # Heuristic task type & complexity analyzer
+│   ├── routing_policy.py       # Route policy & optimizer dispatcher
+│   └── optimizer.py            # Multi-Objective Routing Optimizer (Pareto + normalized scalar scoring)
 ├── telemetry/
 │   ├── __init__.py             # Telemetry module exports
 │   ├── schemas.py              # TelemetryRecord, ProvenanceStatus, GpuTelemetry, PhysicalMeasurement, SavingsComparison
@@ -64,6 +68,7 @@ backend/
     ├── test_telemetry.py           # Unit tests for Phase 5A measurement infrastructure
     ├── test_environmental_accounting.py # Unit tests for Phase 5B environmental accounting & Non-Zero Rule
     ├── test_environmental_accounting_upgrade.py # Unit tests for Phase 5B upgrade (source registry, cloud estimators, grid & water)
+    ├── test_optimizer.py           # Unit & integration tests for Phase 6 Multi-Objective Optimizer (17 tests)
     └── test_api.py                 # Integration tests for FastAPI endpoints
 frontend/                       # React 19 + Vite 8 + Tailwind CSS v4 dashboard
 ```
@@ -137,14 +142,21 @@ npm run dev
   - Preserved authentic on-device NVIDIA GPU power/energy sampling via direct NVML ctypes C-binding with `nvidia-smi` fallback and explicit limitation labeling.
   - Implemented architectural ingestion contracts for future native mobile clients (Android / Apple) without pretending the Python server directly reads remote phone hardware.
   - Added system capabilities introspection (`GET /telemetry/capabilities`) with graceful degradation: uses best real measurement source available, returns `null` + `UNAVAILABLE` otherwise, and never substitutes synthetic estimates.
-- **Phase 5B — Environmental Accounting & Savings Integrity**: Completed (156 tests passing, as reported by the test run).
-- Implemented strict environmental accounting: cloud energy, water, and carbon remain `UNAVAILABLE` when reliable per-request measurements are not available.
-- Added local NVIDIA GPU operational carbon calculation when a valid grid-intensity factor is configured, using measured GPU inference-window energy.
-- Preserved explicit measurement scope and provenance so measured values, estimates, and unavailable metrics are not confused.
-- Added tool/cache avoidance telemetry for model calls, tokens, and latency without assuming zero physical energy consumption.
-- Implemented pairwise savings comparison for energy, water, and carbon, returning `UNAVAILABLE` when either side lacks a valid metric; token, call, and latency differences are tracked separately.
-- Added `POST /telemetry/savings/compare` and supporting schemas, tests, and documentation.
-- Documented limitations: cloud physical energy and water, full-system energy, and embodied carbon are not estimated without defensible data.
+- **Phase 5B — Environmental Accounting & Savings Integrity**: Completed and verified (156 tests passing).
+  - Implemented strict environmental accounting: cloud energy, water, and carbon remain `UNAVAILABLE` when reliable per-request measurements are not available.
+  - Added local NVIDIA GPU operational carbon calculation when a valid grid-intensity factor is configured, using measured GPU inference-window energy.
+  - Preserved explicit measurement scope and provenance so measured values, estimates, and unavailable metrics are not confused.
+  - Added tool/cache avoidance telemetry for model calls, tokens, and latency without assuming zero physical energy consumption.
+  - Implemented pairwise savings comparison for energy, water, and carbon, returning `UNAVAILABLE` when either side lacks a valid metric; token, call, and latency differences are tracked separately.
+  - Added `POST /telemetry/savings/compare` and supporting schemas, tests, and documentation.
+  - Documented limitations: cloud physical energy and water, full-system energy, and embodied carbon are not estimated without defensible data.
+- **Phase 6 — Multi-Objective Routing Optimizer**: Completed and verified (173 tests passing).
+  - Implemented modular `RoutingOptimizer` balancing 4 core objectives: Answer Quality ($Q$), Expected Latency ($L$), Estimated Cost ($\$$), and Environmental Impact ($E$).
+  - **Strict Quality First (Hard Constraints)**: Enforces required quality threshold ($Q \ge Q_{\text{req}}$) based on query complexity (`high` $\to 0.80$, `medium` $\to 0.65$, `low` $\to 0.50$). Candidates below the required threshold are strictly pruned; required answer quality is never sacrificed to save resources.
+  - **Pareto Dominance Filtering**: Identifies and prunes dominated execution paths, isolating non-dominated candidates on the Pareto frontier before scalarization.
+  - **Normalized Scalarized Cost Scoring**: Computes composite cost $S(R) = w_Q \cdot \bar{Q}_{\text{deficit}} + w_L \cdot \bar{L} + w_{\$} \cdot \bar{\$} + w_E \cdot \bar{E}$ using configurable weights in `settings.py` ($w_Q=0.40, w_L=0.25, w_{\$}=0.20, w_E=0.15$).
+  - **Dynamic Weight Renormalization (The Non-Zero Rule)**: Missing or unavailable metrics (e.g. unmeasured cloud energy) are explicitly flagged as `UNAVAILABLE` and their weights are dynamically redistributed across remaining verified objectives ($w'_i = w_i / \sum_{j \in \text{available}} w_j$). Unavailable metrics are never fabricated or treated as zero.
+  - **Full Control Plane Integration**: Integrated into `/chat` request pipeline, `/router/config`, and `/router/optimize`. Emits granular `RoutingDecision` telemetry attached to response metadata and `TelemetryRecord`.
 
 ### End-to-End Execution & Telemetry Flow
 ```text
@@ -389,14 +401,87 @@ Phase 5B operationalizes the peer-reviewed environmental accounting methodology 
    - Classifies comparisons into `MEASURED_VS_MEASURED`, `ESTIMATED_VS_ESTIMATED`, `MIXED_PROVENANCE`, or `UNAVAILABLE`.
    - Quality Gate: If the selected route fails the minimum quality threshold, a quality degradation penalty is logged and physical savings are penalized.
 
-### 4. Limitations
+---
+
+## Phase 6: Multi-Objective Routing Optimizer
+
+Phase 6 introduces a modular, mathematically grounded multi-objective optimization engine ([`backend/router/optimizer.py`](backend/router/optimizer.py)) that balances Answer Quality ($Q$), Expected Latency ($L$), Estimated Cost ($\$$), and Environmental Impact ($E$) without sacrificing required answer quality or fabricating metrics.
+
+### 1. Four Routing Objectives & Formulation
+
+EcoMind optimizes the execution route by evaluating four key objectives across all eligible candidates:
+1. **Answer Quality ($Q \in [0.0, 1.0]$)**: Task suitability and model capability score. Higher is better.
+2. **Expected Latency ($L > 0$ ms)**: Wall-clock execution time. Lower is better.
+3. **Estimated Cost ($\$ \ge 0$)**: Per-request financial cost (zero for local deterministic tools and local models). Lower is better.
+4. **Environmental Impact ($E \ge 0$ Joules)**: Energy consumption from physical sampling or verified estimators. Lower is better.
+
+### 2. Decision Pipeline & Constraints
+
+The optimizer executes a deterministic 5-stage evaluation:
+
+```text
+Eligible Execution Candidates (Deterministic Tools, Semantic Cache, Models)
+    ↓
+Stage 1: Hard Quality Constraints
+    ├── Filter out any candidate with Quality < Q_req
+    └── If no candidate meets Q_req, fallback gracefully to highest-quality candidate
+    ↓
+Stage 2: Pareto Dominance Filtering
+    ├── Identify non-dominated candidates (Pareto Frontier)
+    └── Filter out dominated candidates (worse across all objectives)
+    ↓
+Stage 3: Normalization & Dynamic Weight Renormalization
+    ├── Absolute quality deficit: Q_deficit = 1.0 - Quality
+    ├── Min-max normalization across eligible pool for Latency, Cost, and Energy
+    └── The Non-Zero Rule: If an objective is UNAVAILABLE, drop it and renormalize remaining weights
+    ↓
+Stage 4: Scalarized Composite Cost Scoring
+    └── S(R) = w_Q * Q_deficit + w_L * Latency_norm + w_$ * Cost_norm + w_E * Energy_norm
+    ↓
+Stage 5: Final Selection & Telemetry Recording
+    └── Select candidate with minimum composite cost S(R) and emit RoutingDecision
+```
+
+### 3. Configurable Weights & Thresholds
+
+Configured in [`backend/config/settings.py`](backend/config/settings.py) and overridable via `.env`:
+
+| Setting | Default | Description |
+|---|---|---|
+| `ROUTER_WEIGHT_QUALITY` | `0.40` | Importance weight for answer quality ($w_Q$). |
+| `ROUTER_WEIGHT_LATENCY` | `0.25` | Importance weight for execution latency ($w_L$). |
+| `ROUTER_WEIGHT_COST` | `0.20` | Importance weight for model financial cost ($w_{\$}$). |
+| `ROUTER_WEIGHT_ENVIRONMENT` | `0.15` | Importance weight for environmental impact ($w_E$). |
+| `ROUTER_QUALITY_THRESHOLD_HIGH` | `0.80` | Required quality threshold $Q_{\text{req}}$ for complex/reasoning queries. |
+| `ROUTER_QUALITY_THRESHOLD_MEDIUM` | `0.65` | Required quality threshold $Q_{\text{req}}$ for moderate complexity queries. |
+| `ROUTER_QUALITY_THRESHOLD_LOW` | `0.50` | Required quality threshold $Q_{\text{req}}$ for low complexity/factual queries. |
+| `ROUTER_PARETO_ENABLED` | `True` | Enable Pareto frontier pre-filtering before scalarization. |
+
+### 4. Dynamic Weight Renormalization (The Non-Zero Rule)
+
+In adherence to research integrity, when environmental metrics or costs are marked `UNAVAILABLE` (e.g. cloud providers that do not disclose physical energy or pricing), EcoMind **never treats missing values as zero** and **never invents synthetic constants**:
+$$w'_i = \frac{w_i}{\sum_{j \in \text{Available}} w_j}$$
+The missing objective is excluded from scalarization, and remaining weights are proportionally scaled so that $\sum w'_i = 1.0$.
+
+### 5. Routing API Endpoints
+
+* `GET /router/config`: Inspect current router weights, quality thresholds, and Pareto settings.
+* `POST /router/optimize`: Standalone route optimization endpoint for simulating multi-objective routing decisions over candidate pools.
+
+---
+
+## Limitations & Project Roadmap
+
+### Current Limitations
 
 1. **GPU Energy vs. System Energy**: MEASURED GPU ENERGY measures only the NVIDIA GPU die and memory power draw during inference. It is **not** the total power consumed by the server or host machine (CPU, RAM, storage, cooling fans, and PSU conversion losses are excluded).
 2. **Cloud API Opacity**: Cloud providers do not disclose per-request physical energy, dynamic batch concurrency, facility locations, or cooling water. When cloud estimation is disabled or unverified, these fields are explicitly marked `UNAVAILABLE` and set to `null`.
 3. **Mobile Client Ingestion**: The backend does not directly query mobile device sensors; mobile client telemetry requires client-side transmission.
-4. **Subsequent Roadmap**:
-   * **Phase 5A**: Hardware-agnostic telemetry layer & NVIDIA GPU sampling (Complete).
-   * **Phase 5B**: Environmental accounting methodology, versioned source registry & pluggable cloud estimation (Complete & Verified).
-   * **Phase 6**: Multi-objective Pareto routing optimizer (Upcoming).
-   * **Phase 7**: Comprehensive user-facing Eco Receipts (Upcoming).
+
+### Subsequent Roadmap
+
+* **Phase 5A**: Hardware-agnostic telemetry layer & NVIDIA GPU sampling (Complete & Verified).
+* **Phase 5B**: Environmental accounting methodology, versioned source registry & pluggable cloud estimation (Complete & Verified).
+* **Phase 6**: Multi-objective Pareto routing optimizer (Complete & Verified — 173 tests passing).
+* **Phase 7**: Comprehensive user-facing Eco Receipts (Upcoming).
 

@@ -57,6 +57,16 @@ class Settings(BaseSettings):
     MAX_CACHE_ENTRIES: int = 1000
     CACHE_TTL_DAYS: Optional[int] = 30
 
+    # Phase 6 Multi-Objective Routing Optimizer Settings
+    ROUTER_WEIGHT_QUALITY: float = 0.40
+    ROUTER_WEIGHT_LATENCY: float = 0.25
+    ROUTER_WEIGHT_COST: float = 0.20
+    ROUTER_WEIGHT_ENVIRONMENT: float = 0.15
+    ROUTER_QUALITY_THRESHOLD_HIGH: float = 0.80
+    ROUTER_QUALITY_THRESHOLD_MEDIUM: float = 0.65
+    ROUTER_QUALITY_THRESHOLD_LOW: float = 0.50
+    ROUTER_PARETO_ENABLED: bool = True
+
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,
         env_file_encoding="utf-8",

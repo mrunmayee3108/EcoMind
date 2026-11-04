@@ -1,7 +1,7 @@
 # EcoMind — System Architecture Reference
 
 > **Comprehensive Architectural Specifications, Data Flow, and Request Traces**  
-> *Repository State: Phase 5B (Environmental Accounting Methodology & Multi-Provider Architecture)*
+> *Repository State: Phase 6 (Multi-Objective Routing Optimizer)*
 
 ---
 
@@ -39,8 +39,8 @@ User Query
                                                           │
                                                           ▼
                                        ┌────────────────────────────────────────┐
-                                       │        Multi-Objective Optimizer       │ (Phase 6: Pareto cost trade-offs)
-                                       └──────────────────┬─────────────────────┘
+                                       │        Multi-Objective Optimizer       │ (Phase 6: Quality constraints,
+                                       └──────────────────┬─────────────────────┘  Pareto frontier & scalarized score)
                                                           │
                                                           ▼
                                        ┌────────────────────────────────────────┐
@@ -66,13 +66,13 @@ User Query
 | **Precision-First Semantic Cache** | Phase 4 | **Completed & Verified** | [`semantic_cache.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/cache/semantic_cache.py), [`cache_store.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/cache/cache_store.py), [`compatibility_checker.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/cache/compatibility_checker.py) |
 | **Hardware Telemetry Layer** | Phase 5A | **Completed & Verified** | [`measurement.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/measurement.py), [`gpu.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/gpu.py), [`telemetry.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/telemetry.py) |
 | **Environmental Accounting & Registry** | Phase 5B | **Completed & Verified** | [`registry.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/registry.py), [`cloud_estimator.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/cloud_estimator.py), [`grid.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/grid.py), [`water.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/water.py), [`savings.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/savings.py), Non-Zero Rule, 156 tests |
-| **Multi-Objective Optimizer** | Phase 6 | Planned | Pareto router balancing quality, latency, cost, and energy |
+| **Multi-Objective Optimizer** | Phase 6 | **Completed & Verified** | [`optimizer.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/router/optimizer.py), [`routing_policy.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/router/routing_policy.py), [`routes_chat.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/routes_chat.py), Pareto filtering, dynamic weight renormalization, 173 tests |
 | **Eco Receipt Generation** | Phase 7 | Planned | Per-inference itemized environmental receipts |
 | **Benchmarking & Paper** | Phase 8–11 | Planned | Evaluation suite, ablation studies, and academic manuscript |
 
 ---
 
-## 2. Current Implemented Architecture (Phase 5B Actual)
+## 2. Current Implemented Architecture (Phase 6 Actual)
 
 The diagram below reflects the active control plane execution graph implemented across the backend:
 
@@ -574,6 +574,38 @@ SavingsComparison ([telemetry/schemas.py](file:///c:/Users/Mrunmayee%20Potdar/De
  └── notice: str
 ```
 
+### 6.4 Multi-Objective Routing Decision Schemas (Phase 6)
+
+```text
+CandidateScore ([telemetry/schemas.py](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/schemas.py))
+ ├── candidate_id: str ("deterministic_tool", "semantic_cache", "small", "medium", "large")
+ ├── name: str
+ ├── quality_score: float
+ ├── expected_latency_ms: float
+ ├── estimated_cost_usd: float
+ ├── estimated_energy_joules: Optional[float]
+ ├── energy_provenance: ProvenanceStatus (MEASURED, ESTIMATED, UNAVAILABLE)
+ ├── is_pareto_optimal: bool
+ ├── meets_quality_threshold: bool
+ ├── scalarized_cost: float
+ └── rank: int
+
+RoutingDecision ([telemetry/schemas.py](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/schemas.py))
+ ├── decision_id: str (UUIDv4)
+ ├── timestamp: str (ISO-8601 UTC)
+ ├── selected_route: str
+ ├── selected_candidate_name: str
+ ├── rationale: str
+ ├── quality_threshold_required: float
+ ├── quality_threshold_met: bool
+ ├── pareto_frontier_size: int
+ ├── total_candidates_evaluated: int
+ ├── active_weights: Dict[str, float]
+ ├── normalized_scores: List[CandidateScore]
+ ├── fallback_applied: bool
+ └── fallback_reason: Optional[str]
+```
+
 ---
 
 ## 7. Control Plane REST API Reference
@@ -594,3 +626,5 @@ SavingsComparison ([telemetry/schemas.py](file:///c:/Users/Mrunmayee%20Potdar/De
 | `/telemetry/sources/refresh` | `POST` | *None* | `List[SourceCheckResult]` | Runs an automated freshness audit across all registered environmental coefficients and flags stale/review-needed entries. |
 | `/telemetry/grid` | `GET` | *None* | `GridIntensityRecord` | Returns the active grid carbon intensity ($gCO_2e/\text{kWh}$), region, live provider status, and fallback state. |
 | `/telemetry/clear` | `POST` | *None* | `Dict[str, Any]` | Flushes the in-memory telemetry buffer. |
+| `/router/config` | `GET` | *None* | [`RouterConfigResponse`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | Introspects active router weights ($w_Q, w_L, w_{\$}, w_E$), quality thresholds, and Pareto enablement status. |
+| `/router/optimize` | `POST` | [`RouteOptimizationRequest`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | [`RoutingDecision`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/schemas.py) | Standalone endpoint to simulate or invoke multi-objective routing optimization over arbitrary candidate sets. |
