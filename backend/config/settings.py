@@ -67,6 +67,13 @@ class Settings(BaseSettings):
     ROUTER_QUALITY_THRESHOLD_LOW: float = 0.50
     ROUTER_PARETO_ENABLED: bool = True
 
+    # Phase 8 Historical Storage & Dashboard Settings
+    HISTORICAL_DB_PATH: str = "database/historical_telemetry.db"
+    HISTORICAL_STORE_ENABLED: bool = True
+    HISTORICAL_MAX_QUERY_PREVIEW_LEN: int = 120
+    HISTORICAL_DEFAULT_PAGE_SIZE: int = 25
+    HISTORICAL_MAX_PAGE_SIZE: int = 100
+
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,
         env_file_encoding="utf-8",

@@ -36,6 +36,7 @@ from telemetry.savings import calculate_savings
 from telemetry.registry import source_registry, source_validation_service
 from telemetry.grid import grid_manager
 from receipt import generate_eco_receipt, EcoReceipt
+from database.historical_store import historical_store
 
 router = APIRouter()
 
@@ -116,6 +117,7 @@ async def chat_endpoint(request: ChatRequest):
                     routing_decision=tool_decision
                 )
                 receipt = generate_eco_receipt(telemetry_rec, query=query)
+                historical_store.save_record(telemetry_rec, receipt=receipt, query_preview=query)
                 tool_metadata = {
                     "tool_used": candidate_tool.name,
                     "tool_metadata": tool_result.metadata,
@@ -202,6 +204,7 @@ async def chat_endpoint(request: ChatRequest):
                 routing_decision=cache_decision
             )
             receipt = generate_eco_receipt(telemetry_rec, query=query)
+            historical_store.save_record(telemetry_rec, receipt=receipt, query_preview=query)
             cache_metadata = {
                 "cache_status": "hit",
                 "cache_similarity": cache_similarity,
@@ -272,6 +275,8 @@ async def chat_endpoint(request: ChatRequest):
             execution_time_ms=(time.perf_counter() - start_time) * 1000,
             error_message=f"Unsupported route preference '{request.preferred_route}'."
         )
+        fail_rcpt = generate_eco_receipt(fail_rec, query=query)
+        historical_store.save_record(fail_rec, receipt=fail_rcpt, query_preview=query)
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported route preference '{request.preferred_route}'.",
@@ -353,6 +358,7 @@ async def chat_endpoint(request: ChatRequest):
         )
 
         receipt = generate_eco_receipt(telemetry_rec, query=query)
+        historical_store.save_record(telemetry_rec, receipt=receipt, query_preview=query)
         metadata["eco_receipt"] = receipt.model_dump()
 
         return ChatResponse(
@@ -378,6 +384,8 @@ async def chat_endpoint(request: ChatRequest):
             execution_time_ms=(time.perf_counter() - start_time) * 1000,
             error_message=str(pue)
         )
+        fail_rcpt = generate_eco_receipt(fail_rec, query=query)
+        historical_store.save_record(fail_rec, receipt=fail_rcpt, query_preview=query)
         raise HTTPException(
             status_code=503,
             detail=str(pue),
@@ -391,6 +399,8 @@ async def chat_endpoint(request: ChatRequest):
             execution_time_ms=(time.perf_counter() - start_time) * 1000,
             error_message=str(ve)
         )
+        fail_rcpt = generate_eco_receipt(fail_rec, query=query)
+        historical_store.save_record(fail_rec, receipt=fail_rcpt, query_preview=query)
         raise HTTPException(
             status_code=400,
             detail=str(ve),
@@ -404,6 +414,8 @@ async def chat_endpoint(request: ChatRequest):
             execution_time_ms=(time.perf_counter() - start_time) * 1000,
             error_message=str(e)
         )
+        fail_rcpt = generate_eco_receipt(fail_rec, query=query)
+        historical_store.save_record(fail_rec, receipt=fail_rcpt, query_preview=query)
         raise HTTPException(
             status_code=500,
             detail=str(e),
@@ -525,8 +537,12 @@ def preview_routing_optimization(request: RoutePreviewRequest):
 def get_receipt_by_id(request_id: str):
     """
     Retrieve or reconstruct a machine-readable Eco Receipt for any completed or failed request ID.
-    Leverages recorded telemetry without triggering model inference.
+    Queries the persistent historical SQLite store first, falling back to in-memory telemetry.
     """
+    rcpt = historical_store.get_receipt(request_id)
+    if rcpt:
+        return rcpt
+
     rec = telemetry_collector.get_record(request_id)
     if not rec:
         raise HTTPException(

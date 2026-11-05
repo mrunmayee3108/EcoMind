@@ -25,7 +25,12 @@ backend/
 ├── main.py                     # FastAPI application entrypoint
 ├── api/
 │   ├── routes_chat.py          # /chat, /tools, /models, /telemetry endpoints
-│   └── schemas.py              # Pydantic v2 request/response schemas
+│   ├── routes_dashboard.py     # /dashboard/summary, /environment, /routes, /timeseries, /receipts
+│   ├── schemas.py              # Pydantic v2 request/response schemas
+│   └── schemas_dashboard.py    # Pydantic v2 dashboard analytics schemas
+├── database/
+│   ├── __init__.py             # Database package exports
+│   └── historical_store.py     # Persistent SQLite Historical Store for telemetry & Eco Receipts
 ├── models/
 │   ├── provider.py             # ModelProvider base class & ProviderResponse
 │   ├── gemini_provider.py      # Google GenAI provider with authentic token usage
@@ -56,7 +61,7 @@ backend/
 │   ├── text_analyzer.py        # Deterministic text metrics (word/char/sentence count, frequency)
 │   └── tool_registry.py        # Central tool registry & candidate matcher
 ├── config/
-│   └── settings.py             # Application settings & environment variables (including LOCAL_GRID_INTENSITY_GCO2E_PER_KWH)
+│   └── settings.py             # Application settings (including HISTORICAL_DB_PATH, LOCAL_GRID_INTENSITY_GCO2E_PER_KWH)
 └── tests/
     ├── test_calculator.py          # Unit tests for Calculator arithmetic & safety
     ├── test_unit_converter.py      # Unit tests for UnitConverter dimensions & edge cases
@@ -74,8 +79,9 @@ backend/
     ├── test_environmental_accounting_upgrade.py # Unit tests for Phase 5B upgrade (source registry, cloud estimators, grid & water)
     ├── test_optimizer.py           # Unit & integration tests for Phase 6 Multi-Objective Optimizer (17 tests)
     ├── test_eco_receipt.py         # Unit & integration tests for Phase 7 Eco Receipt Generation (18 tests)
+    ├── test_dashboard.py           # Unit & integration tests for Phase 8 Historical Store & Dashboard (10 tests)
     └── test_api.py                 # Integration tests for FastAPI endpoints
-frontend/                       # React 19 + Vite 8 + Tailwind CSS v4 dashboard
+frontend/                       # React 19 + Vite 8 + Tailwind CSS v4 + Recharts dashboard
 ```
 
 ## Setup & Installation
@@ -168,6 +174,21 @@ npm run dev
   - Preserves strict integrity: missing metrics remain `null` and `UNAVAILABLE`; zero values are only reported when genuinely measured or known structural zeroes ($0.00 external provider charges and 0 LLM tokens for deterministic tools and cache hits).
   - Explicit cost semantics: zero local/tool cost denotes zero external provider API billing, not zero total host computing or electricity cost; cost provenance is `ESTIMATED` and never labeled as direct physical measurement.
   - Transparent explainability breakdown detailing why the route was selected, measured vs estimated metrics, unavailable metric justifications, and uncertainty/boundary limitations without claiming global optimality.
+- **Phase 8 — Sustainability Dashboard & Historical Analytics**: Completed and verified (201 tests passing).
+  - Designed and implemented persistent SQLite store (`backend/database/historical_store.py`) at `database/historical_telemetry.db` with indexed schema `historical_requests`.
+  - Durably records completed requests and structured `EcoReceipt` payloads, eliminating retention loss from in-memory ring-buffer evictions.
+  - Prevents record duplication via idempotent `INSERT ... ON CONFLICT(request_id) DO UPDATE` handling.
+  - Sanitizes and truncates query previews (`HISTORICAL_MAX_QUERY_PREVIEW_LEN = 120`) to prevent leaking sensitive inputs into storage.
+  - Implemented 6 new REST analytics endpoints under `/dashboard/*`:
+    - `GET /dashboard/summary`: High-level KPIs, success rate, token counts, itemized external API costs, avoided model calls, and route/provider breakdowns.
+    - `GET /dashboard/environment`: Strict environmental aggregations separating hardware-measured energy from model estimations, operational carbon, water disclosures, and active grid factor authorities.
+    - `GET /dashboard/routes`: Multi-objective routing efficiency metrics, Pareto-optimal selection rate, quality compliance rate, and fallback justification audit.
+    - `GET /dashboard/timeseries`: Chronological time-bucketed activity, latency, token consumption, and energy trends.
+    - `GET /dashboard/receipts`: Filterable, paginated Eco Receipt summary catalog with date-range and execution-path filtering.
+    - `GET /dashboard/receipts/{request_id}`: Durable full `EcoReceipt` retrieval from SQLite with fallback to in-memory buffers.
+  - Upgraded React 19 + TypeScript frontend with unified view switcher:
+    - **Inference Playground**: Interactive chat interface with real-time routing telemetry and one-click "Inspect Eco Receipt" modal action.
+    - **Sustainability Dashboard**: 4 dedicated tabs (Overview with timeseries charts, Environmental Footprint with scope boundary disclosures, Routing & Pareto Analytics, and Receipts Explorer table with modal inspector).
 
 ### End-to-End Execution & Telemetry Flow
 ```text
