@@ -73,7 +73,7 @@ backend/
     ├── test_environmental_accounting.py # Unit tests for Phase 5B environmental accounting & Non-Zero Rule
     ├── test_environmental_accounting_upgrade.py # Unit tests for Phase 5B upgrade (source registry, cloud estimators, grid & water)
     ├── test_optimizer.py           # Unit & integration tests for Phase 6 Multi-Objective Optimizer (17 tests)
-    ├── test_eco_receipt.py         # Unit & integration tests for Phase 7 Eco Receipt Generation (13 tests)
+    ├── test_eco_receipt.py         # Unit & integration tests for Phase 7 Eco Receipt Generation (18 tests)
     └── test_api.py                 # Integration tests for FastAPI endpoints
 frontend/                       # React 19 + Vite 8 + Tailwind CSS v4 dashboard
 ```
@@ -162,10 +162,11 @@ npm run dev
   - **Normalized Scalarized Cost Scoring**: Computes composite cost $S(R) = w_Q \cdot \bar{Q}_{\text{deficit}} + w_L \cdot \bar{L} + w_{\$} \cdot \bar{\$} + w_E \cdot \bar{E}$ using configurable weights in `settings.py` ($w_Q=0.40, w_L=0.25, w_{\$}=0.20, w_E=0.15$).
   - **Dynamic Weight Renormalization (The Non-Zero Rule)**: Missing or unavailable metrics (e.g. unmeasured cloud energy) are explicitly flagged as `UNAVAILABLE` and their weights are dynamically redistributed across remaining verified objectives ($w'_i = w_i / \sum_{j \in \text{available}} w_j$). Unavailable metrics are never fabricated or treated as zero.
   - **Full Control Plane Integration**: Integrated into `/chat` request pipeline, `/router/config`, and `/router/optimize`. Emits granular `RoutingDecision` telemetry attached to response metadata and `TelemetryRecord`.
-- **Phase 7 — Eco Receipt Generation**: Completed and verified (186 tests passing).
+- **Phase 7 — Eco Receipt Generation**: Completed and verified (191 tests passing).
   - Designed and implemented structured, machine-readable `EcoReceipt` attached to every `/chat` completion and retrievable via `GET /receipts/{request_id}` and `GET /telemetry/receipt/{request_id}`.
   - Itemizes operational latency, provider-reported token usage, defensible catalog monetary cost, and environmental impacts (energy in Joules/kWh, operational carbon in gCO2e, and water).
-  - Preserves strict integrity: missing metrics remain `null` and `UNAVAILABLE`; zero values are only reported when genuinely measured (0 tokens and $0.00 cost for deterministic tools and cache hits).
+  - Preserves strict integrity: missing metrics remain `null` and `UNAVAILABLE`; zero values are only reported when genuinely measured or known structural zeroes ($0.00 external provider charges and 0 LLM tokens for deterministic tools and cache hits).
+  - Explicit cost semantics: zero local/tool cost denotes zero external provider API billing, not zero total host computing or electricity cost; cost provenance is `ESTIMATED` and never labeled as direct physical measurement.
   - Transparent explainability breakdown detailing why the route was selected, measured vs estimated metrics, unavailable metric justifications, and uncertainty/boundary limitations without claiming global optimality.
 
 ### End-to-End Execution & Telemetry Flow
@@ -505,7 +506,8 @@ EcoReceipt ([backend/receipt/schemas.py](backend/receipt/schemas.py))
  │    └── provenance: PROVIDER_REPORTED / MEASURED (0 for tools/cache)
  ├── cost: CostMetric
  │    ├── value_usd: Optional[float] ($0.00 for tools/cache/local; catalog rate for cloud)
- │    ├── provenance: ProvenanceStatus (MEASURED for tools/cache/local, ESTIMATED for cloud)
+ │    ├── provenance: ProvenanceStatus (ESTIMATED for all calculated external API charges; never MEASURED)
+ │    ├── is_zero_external_api_charge: bool
  │    └── pricing_source: str
  ├── environment: EnvironmentalBreakdown
  │    ├── energy: EnergyMetric (Joules, kWh, scope, provenance, platform, disclaimer)
@@ -526,9 +528,10 @@ EcoReceipt ([backend/receipt/schemas.py](backend/receipt/schemas.py))
 ### 2. Strict Measurement Integrity Safeguards
 
 - **No Value Fabrication**: Unmetered metrics (cloud physical energy, water, uncalculated carbon) remain `null` with `ProvenanceStatus.UNAVAILABLE`; they are **never converted to zero**.
-- **Accurate Zeroes Only When Measured**: $0.00$ cost and $0$ tokens are reported only when verified (AST calculator, unit converter, semantic cache hits, local offline models).
+- **Accurate Zeroes Only When Established**: $0.00 external API charges and $0$ LLM tokens are reported only when verified (AST calculator, unit converter, semantic cache hits, local offline models). $0.00$ external charges denotes zero provider billing fees, not zero total computing or electricity cost.
+- **Cost Provenance**: Costs derived from token counts and rate tables are classified as `ProvenanceStatus.ESTIMATED` and never labeled as direct physical measurements.
 - **Measurement Boundary Scoping**: Local NVIDIA GPU power draw is explicitly labeled `"MEASURED GPU ENERGY (INFERENCE WINDOW ONLY - NOT TOTAL SYSTEM ENERGY)"`.
-- **Conditional Carbon Calculation**: Operational carbon is computed only when a valid regional grid carbon intensity ($> 0$) is active.
+- **Conditional Carbon Calculation**: Operational carbon is computed only when a valid regional grid carbon intensity ($> 0$) and valid energy telemetry are present.
 - **Explainability without False Claims**: The selection policy is explained through the configured multi-objective optimizer weights and constraints, without claiming global optimality.
 
 ### 3. Receipt API Endpoints
@@ -545,12 +548,13 @@ EcoReceipt ([backend/receipt/schemas.py](backend/receipt/schemas.py))
 1. **GPU Energy vs. System Energy**: MEASURED GPU ENERGY measures only the NVIDIA GPU die and memory power draw during inference. It is **not** the total power consumed by the server or host machine (CPU, RAM, storage, cooling fans, and PSU conversion losses are excluded).
 2. **Cloud API Opacity**: Cloud providers do not disclose per-request physical energy, dynamic batch concurrency, facility locations, or cooling water. When cloud estimation is disabled or unverified, these fields are explicitly marked `UNAVAILABLE` and set to `null`.
 3. **Mobile Client Ingestion**: The backend does not directly query mobile device sensors; mobile client telemetry requires client-side transmission.
+4. **In-Memory Buffer Retention**: Telemetry and receipts reside in an in-memory retention buffer (`deque(maxlen=1000)`). If a request ID is evicted after 1,000 subsequent requests or the server restarts, retrieval returns HTTP 404 with explicit buffer eviction documentation. Persistent database archiving is scheduled for Phase 8.
 
 ### Subsequent Roadmap
 
 * **Phase 5A**: Hardware-agnostic telemetry layer & NVIDIA GPU sampling (Complete & Verified).
 * **Phase 5B**: Environmental accounting methodology, versioned source registry & pluggable cloud estimation (Complete & Verified).
 * **Phase 6**: Multi-objective Pareto routing optimizer (Complete & Verified — 173 tests passing).
-* **Phase 7**: Comprehensive user-facing Eco Receipts (Complete & Verified — 186 tests passing).
+* **Phase 7**: Comprehensive user-facing Eco Receipts (Complete & Verified — 191 tests passing).
 * **Phase 8**: Sustainability Dashboard & Historical Aggregations (Upcoming).
 

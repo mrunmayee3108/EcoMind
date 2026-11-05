@@ -67,7 +67,7 @@ User Query
 | **Hardware Telemetry Layer** | Phase 5A | **Completed & Verified** | [`measurement.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/measurement.py), [`gpu.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/gpu.py), [`telemetry.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/telemetry.py) |
 | **Environmental Accounting & Registry** | Phase 5B | **Completed & Verified** | [`registry.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/registry.py), [`cloud_estimator.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/cloud_estimator.py), [`grid.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/grid.py), [`water.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/water.py), [`savings.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/savings.py), Non-Zero Rule, 156 tests |
 | **Multi-Objective Optimizer** | Phase 6 | **Completed & Verified** | [`optimizer.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/router/optimizer.py), [`routing_policy.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/router/routing_policy.py), [`routes_chat.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/routes_chat.py), Pareto filtering, dynamic weight renormalization, 173 tests |
-| **Eco Receipt Generation** | Phase 7 | **Completed & Verified** | [`receipt/schemas.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/schemas.py), [`receipt_generator.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/receipt_generator.py), itemized resource invoices, explainability, 186 tests |
+| **Eco Receipt Generation** | Phase 7 | **Completed & Verified** | [`receipt/schemas.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/schemas.py), [`receipt_generator.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/receipt_generator.py), itemized resource invoices, explainability, 191 tests |
 | **Sustainability Dashboard** | Phase 8 | Planned | Aggregated longitudinal analytics & trend visualization |
 | **Benchmarking & Paper** | Phase 9–11 | Planned | Evaluation suite, ablation studies, and academic manuscript |
 
@@ -624,7 +624,7 @@ EcoReceipt ([backend/receipt/schemas.py](file:///c:/Users/Mrunmayee%20Potdar/Des
  ├── inference_latency_ms: Optional[float]
  ├── latency_provenance: ProvenanceStatus (MEASURED)
  ├── tokens: TokenTelemetry
- ├── cost: CostMetric (USD, provenance, pricing source, details)
+ ├── cost: CostMetric (USD, provenance: ESTIMATED/UNAVAILABLE, pricing source, details, is_zero_external_api_charge)
  ├── environment: EnvironmentalBreakdown
  │    ├── energy: EnergyMetric (Joules, kWh, scope, provenance, platform, disclaimer)
  │    ├── carbon: CarbonMetric (gCO2e, scope, provenance, grid intensity factor & source)

@@ -39,31 +39,35 @@ def _calculate_monetary_cost(
     status: str
 ) -> CostMetric:
     """
-    Calculate defensible monetary cost in USD without guessing or fabricating.
-    Returns CostMetric with explicit provenance.
+    Calculate defensible monetary cost in USD representing external provider API billing.
+    Accurately distinguishes zero external API charges from zero total computing cost.
+    Cost is never categorized as a direct measurement.
     """
-    if status == "FAILED":
+    if status in ("FAILED", "PARTIAL"):
         return CostMetric(
             value_usd=None,
             provenance=ProvenanceStatus.UNAVAILABLE,
             pricing_source="None",
-            details="Request failed before inference completed; no monetary cost was incurred."
+            details="Execution did not complete successfully; monetary cost is unavailable without full provider billing metadata.",
+            is_zero_external_api_charge=False
         )
 
     if execution_path == ExecutionPath.DETERMINISTIC_TOOL:
         return CostMetric(
             value_usd=0.0,
-            provenance=ProvenanceStatus.MEASURED,
+            provenance=ProvenanceStatus.ESTIMATED,
             pricing_source="Local CPU Deterministic Tool",
-            details="0 tokens processed; 0.00 USD API cost."
+            details="0.00 USD external provider API charges (zero external API calls). Does not imply zero total computing, hardware, or host electricity cost.",
+            is_zero_external_api_charge=True
         )
 
     if execution_path == ExecutionPath.SEMANTIC_CACHE:
         return CostMetric(
             value_usd=0.0,
-            provenance=ProvenanceStatus.MEASURED,
+            provenance=ProvenanceStatus.ESTIMATED,
             pricing_source="Local Semantic Cache",
-            details="0 model tokens processed; 0.00 USD API cost."
+            details="0.00 USD external provider API charges (reused from local cache). Does not imply zero total computing, hardware, or host electricity cost.",
+            is_zero_external_api_charge=True
         )
 
     # Model inference path
@@ -73,7 +77,8 @@ def _calculate_monetary_cost(
             value_usd=None,
             provenance=ProvenanceStatus.UNAVAILABLE,
             pricing_source="Unknown",
-            details="Model identifier absent; cost cannot be computed."
+            details="Model identifier absent; cost cannot be computed.",
+            is_zero_external_api_charge=False
         )
 
     profile = get_model_profile(model_id)
@@ -82,21 +87,31 @@ def _calculate_monetary_cost(
             value_usd=None,
             provenance=ProvenanceStatus.UNAVAILABLE,
             pricing_source=f"Unregistered Model: {model_id}",
-            details=f"Pricing profile for model '{model_id}' is not configured in the catalog."
+            details=f"Pricing profile for model '{model_id}' is not configured in the catalog.",
+            is_zero_external_api_charge=False
         )
 
     if profile.is_local:
         return CostMetric(
             value_usd=0.0,
-            provenance=ProvenanceStatus.MEASURED,
+            provenance=ProvenanceStatus.ESTIMATED,
             pricing_source=f"Local Model Catalog ({model_id})",
-            details="On-device / local execution incurs 0.00 USD external API provider cost."
+            details="0.00 USD external provider API charges (on-device local inference). Does not imply zero total computing, hardware, or host electricity cost.",
+            is_zero_external_api_charge=True
         )
 
     # Cloud model with public pricing
     if profile.pricing_input_per_1m_usd is not None and profile.pricing_output_per_1m_usd is not None:
-        in_tokens = telemetry_record.tokens.input_tokens or 0
-        out_tokens = telemetry_record.tokens.output_tokens or 0
+        in_tokens = telemetry_record.tokens.input_tokens
+        out_tokens = telemetry_record.tokens.output_tokens
+        if in_tokens is None or out_tokens is None:
+            return CostMetric(
+                value_usd=None,
+                provenance=ProvenanceStatus.UNAVAILABLE,
+                pricing_source=f"Catalog ({model_id})",
+                details="Cannot calculate monetary cost because provider token counts are unavailable or unmeasured.",
+                is_zero_external_api_charge=False
+            )
         in_cost = (in_tokens / 1_000_000.0) * profile.pricing_input_per_1m_usd
         out_cost = (out_tokens / 1_000_000.0) * profile.pricing_output_per_1m_usd
         total_cost = round(in_cost + out_cost, 8)
@@ -104,14 +119,16 @@ def _calculate_monetary_cost(
             value_usd=total_cost,
             provenance=ProvenanceStatus.ESTIMATED,
             pricing_source=f"Official catalog pricing ({profile.provider}: ${profile.pricing_input_per_1m_usd}/1M in, ${profile.pricing_output_per_1m_usd}/1M out)",
-            details=f"Prompt: {in_tokens} tokens (${in_cost:.6f}) + Completion: {out_tokens} tokens (${out_cost:.6f})"
+            details=f"Prompt: {in_tokens} tokens (${in_cost:.6f}) + Completion: {out_tokens} tokens (${out_cost:.6f}). External provider API charges only.",
+            is_zero_external_api_charge=False
         )
 
     return CostMetric(
         value_usd=None,
         provenance=ProvenanceStatus.UNAVAILABLE,
         pricing_source=f"Catalog ({model_id})",
-        details="Pricing rate is missing or undisclosed for this model."
+        details="Pricing rate is missing or undisclosed for this model.",
+        is_zero_external_api_charge=False
     )
 
 def _build_environmental_breakdown(telemetry_record: TelemetryRecord) -> EnvironmentalBreakdown:
@@ -163,11 +180,14 @@ def _build_environmental_breakdown(telemetry_record: TelemetryRecord) -> Environ
     grid_source_label = None
     formula_str = None
 
-    if val_c is not None and grid_int is not None and grid_int > 0:
+    # Carbon calculation strictly requires valid energy AND valid positive grid intensity
+    if val_c is not None and val_j is not None and grid_int is not None and grid_int > 0:
         grid_source_label = "Configured Regional Grid Intensity Factor"
         formula_str = "Operational_Carbon (gCO2e) = Energy (kWh) * Grid_Intensity (gCO2e/kWh)"
-    elif grid_int is None or grid_int <= 0:
+    else:
+        val_c = None
         c_prov = ProvenanceStatus.UNAVAILABLE
+        c_scope = None
 
     carbon_metric = CarbonMetric(
         value_gco2e=val_c,
@@ -254,8 +274,13 @@ def _build_explainability(
     # 1. Selection summary
     if status == "FAILED":
         selection_summary = (
-            f"The request failed during processing with error: '{telemetry_record.error_message or 'Unknown error'}'. "
+            f"The request failed prior to completion with error: '{telemetry_record.error_message or 'Unknown error'}'. "
             f"Execution halted before completion; no subsequent inference or cache writes were performed."
+        )
+    elif status == "PARTIAL":
+        selection_summary = (
+            f"The request partially executed but encountered an error before completion: '{telemetry_record.error_message or 'Incomplete'}'. "
+            f"Only preliminary operational metrics captured prior to interruption are reported."
         )
     elif execution_path == ExecutionPath.DETERMINISTIC_TOOL:
         selection_summary = (
@@ -285,39 +310,44 @@ def _build_explainability(
                 f"based on requested execution preference."
             )
 
-    # 2. Measurement vs Estimation
+    # 2. Measurement vs Estimation (Strict Non-Fabrication)
     measured_items: List[str] = [f"Total Latency ({telemetry_record.latency.execution_time_ms:.1f} ms)"]
     if telemetry_record.latency.inference_latency_ms is not None:
         measured_items.append(f"Inference Latency ({telemetry_record.latency.inference_latency_ms:.1f} ms)")
     
-    if telemetry_record.tokens.provenance == ProvenanceStatus.MEASURED:
-        measured_items.append("Token Count (0 tokens measured)")
-    elif telemetry_record.tokens.provenance == ProvenanceStatus.PROVIDER_REPORTED:
-        measured_items.append(f"Tokens ({telemetry_record.tokens.total_tokens or 0} provider-reported)")
+    if execution_path in (ExecutionPath.DETERMINISTIC_TOOL, ExecutionPath.SEMANTIC_CACHE):
+        measured_items.append("Token Count (0 LLM tokens, known zero by construction without neural model inference)")
+    elif telemetry_record.tokens.provenance == ProvenanceStatus.PROVIDER_REPORTED and telemetry_record.tokens.total_tokens is not None:
+        measured_items.append(f"Tokens ({telemetry_record.tokens.total_tokens} provider-reported)")
+    elif telemetry_record.tokens.provenance == ProvenanceStatus.MEASURED and telemetry_record.tokens.total_tokens is not None:
+        measured_items.append(f"Tokens ({telemetry_record.tokens.total_tokens} directly measured)")
 
-    if env_breakdown.energy.is_measured:
+    if env_breakdown.energy.is_measured and env_breakdown.energy.value_joules is not None:
         measured_items.append(f"GPU Board Energy ({env_breakdown.energy.value_joules:.2f} J measured on-device)")
-
-    if cost_metric.provenance == ProvenanceStatus.MEASURED:
-        measured_items.append("Monetary Cost ($0.00 measured)")
 
     estimated_items: List[str] = []
     if env_breakdown.energy.is_estimated and env_breakdown.energy.value_joules is not None:
-        estimated_items.append(f"Cloud Energy ({env_breakdown.energy.value_joules:.2f} J estimated)")
+        estimated_items.append(f"Cloud Energy ({env_breakdown.energy.value_joules:.2f} J estimated via {env_breakdown.estimator_name or 'model'})")
     if env_breakdown.carbon.provenance == ProvenanceStatus.ESTIMATED and env_breakdown.carbon.value_gco2e is not None:
-        estimated_items.append(f"Operational Carbon ({env_breakdown.carbon.value_gco2e:.4f} gCO2e estimated)")
-    if cost_metric.provenance == ProvenanceStatus.ESTIMATED and cost_metric.value_usd is not None:
-        estimated_items.append(f"API Cost (${cost_metric.value_usd:.6f} estimated from catalog)")
+        estimated_items.append(f"Operational Carbon ({env_breakdown.carbon.value_gco2e:.4f} gCO2e estimated from grid intensity)")
+    
+    if cost_metric.value_usd is not None:
+        if cost_metric.is_zero_external_api_charge:
+            estimated_items.append("External Provider API Charges ($0.00 established zero vendor fee)")
+        else:
+            estimated_items.append(f"External Provider API Cost (${cost_metric.value_usd:.6f} estimated from catalog token rates)")
 
     meas_str = ", ".join(measured_items) if measured_items else "None"
     est_str = ", ".join(estimated_items) if estimated_items else "None"
     measurement_vs_estimation = (
-        f"Directly Measured: {meas_str}. "
-        f"Scientifically Estimated: {est_str}."
+        f"Directly Measured / Known Zero: {meas_str}. "
+        f"Scientifically Estimated / Catalog-Derived: {est_str}."
     )
 
     # 3. Unavailable metrics rationale
     unav_list: List[str] = []
+    if telemetry_record.tokens.provenance == ProvenanceStatus.UNAVAILABLE:
+        unav_list.append("Token counts are UNAVAILABLE because no token usage metadata was provided by the upstream engine.")
     if env_breakdown.energy.provenance == ProvenanceStatus.UNAVAILABLE:
         unav_list.append("Physical Energy is UNAVAILABLE because cloud providers do not disclose server power draw and no hardware sensor was active.")
     if env_breakdown.carbon.provenance == ProvenanceStatus.UNAVAILABLE:
@@ -325,7 +355,7 @@ def _build_explainability(
     if env_breakdown.water.provenance == ProvenanceStatus.UNAVAILABLE:
         unav_list.append("Water Footprint is UNAVAILABLE because datacenter cooling WUE and locations are undisclosed (anti-fabrication safeguard).")
     if cost_metric.provenance == ProvenanceStatus.UNAVAILABLE:
-        unav_list.append(f"Monetary Cost is UNAVAILABLE ({cost_metric.details}).")
+        unav_list.append(f"External API Cost is UNAVAILABLE ({cost_metric.details}).")
 
     if not unav_list:
         unavailable_rationale = "All expected operational and environmental metrics were successfully measured or estimated."
@@ -335,7 +365,8 @@ def _build_explainability(
     # 4. Caveats & Uncertainty
     caveats: List[str] = [
         "Routing decisions are determined by the configured optimizer policy, weights, and available proxy metrics; "
-        "they are not claimed to be globally optimal across unmeasured variables or untracked models."
+        "they are not claimed to be globally optimal across unmeasured variables or untracked models.",
+        "Reported monetary cost reflects external provider API billing only, and does not reflect host electricity or server hardware amortisation."
     ]
     if env_breakdown.energy.is_measured:
         caveats.append(
@@ -362,7 +393,16 @@ def generate_eco_receipt(
     Generate an EcoReceipt from a recorded TelemetryRecord and optional query context.
     Enforces strict non-fabrication, measurement scope isolation, and clear explainability.
     """
-    status = "SUCCESS" if telemetry_record.success else "FAILED"
+    if telemetry_record.success:
+        status = "SUCCESS"
+    elif (
+        (telemetry_record.tokens.input_tokens is not None and telemetry_record.tokens.input_tokens > 0)
+        or (telemetry_record.latency.inference_latency_ms is not None and telemetry_record.latency.inference_latency_ms > 0)
+    ):
+        status = "PARTIAL"
+    else:
+        status = "FAILED"
+
     execution_path = _classify_execution_path(telemetry_record)
     
     # Calculate monetary cost
@@ -384,8 +424,9 @@ def generate_eco_receipt(
             reasoning=telemetry_record.avoidance.reasoning,
             defensible_savings_reported=False,
             savings_notice=(
-                "Operational avoidance reflects bypassed model calls and tokens relative to baseline. "
-                "Physical energy and carbon savings are reported as UNAVAILABLE in accordance with the Non-Zero Rule."
+                f"Operational avoidance reflects bypassed model calls relative to counterfactual '{telemetry_record.avoidance.baseline_route}' baseline. "
+                "Bypassing a model call does NOT imply physical energy or carbon savings unless both routes have directly measured or validated baseline telemetry (Non-Zero Rule). "
+                "Physical environmental savings remain UNAVAILABLE."
             )
         )
 

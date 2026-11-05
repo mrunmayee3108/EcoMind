@@ -17,11 +17,12 @@ class ExecutionPath(str, Enum):
     MODEL_INFERENCE = "model_inference"
 
 class CostMetric(BaseModel):
-    """Defensible monetary cost calculation."""
-    value_usd: Optional[float] = Field(default=None, description="Calculated monetary cost in USD (null if unavailable)")
-    provenance: ProvenanceStatus = Field(default=ProvenanceStatus.UNAVAILABLE, description="Authentic cost provenance")
+    """Defensible monetary cost calculation representing external provider API billing."""
+    value_usd: Optional[float] = Field(default=None, description="Calculated external provider API charge in USD (null if unavailable)")
+    provenance: ProvenanceStatus = Field(default=ProvenanceStatus.UNAVAILABLE, description="Cost provenance: ESTIMATED for calculated/established API charges, UNAVAILABLE if uncalculated (never MEASURED)")
     pricing_source: Optional[str] = Field(default=None, description="Public pricing catalog or rate table used")
-    details: Optional[str] = Field(default=None, description="Itemized calculation description")
+    details: Optional[str] = Field(default=None, description="Itemized calculation description distinguishing zero external API charges from zero total computing cost")
+    is_zero_external_api_charge: bool = Field(default=False, description="True if execution incurs zero external provider API billing")
 
 class EnergyMetric(BaseModel):
     """Energy consumption metric with strict measurement boundary distinction."""

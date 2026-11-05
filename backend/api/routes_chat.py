@@ -147,7 +147,7 @@ async def chat_endpoint(request: ChatRequest):
                     eco_receipt=receipt
                 )
             elif route_pref == "deterministic_tool":
-                telemetry_collector.record_failure(
+                fail_rec = telemetry_collector.record_failure(
                     route="deterministic_tool",
                     provider="deterministic",
                     execution_time_ms=(time.perf_counter() - start_time) * 1000,
@@ -155,10 +155,11 @@ async def chat_endpoint(request: ChatRequest):
                 )
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Deterministic tool execution failed: {tool_result.error}"
+                    detail=f"Deterministic tool execution failed: {tool_result.error}",
+                    headers={"X-Request-ID": fail_rec.request_id}
                 )
         elif route_pref == "deterministic_tool":
-            telemetry_collector.record_failure(
+            fail_rec = telemetry_collector.record_failure(
                 route="deterministic_tool",
                 provider="deterministic",
                 execution_time_ms=(time.perf_counter() - start_time) * 1000,
@@ -166,7 +167,8 @@ async def chat_endpoint(request: ChatRequest):
             )
             raise HTTPException(
                 status_code=400,
-                detail="No available deterministic tool can handle this query."
+                detail="No available deterministic tool can handle this query.",
+                headers={"X-Request-ID": fail_rec.request_id}
             )
 
     # Step 2: Semantic Cache Lookup (Stage 1 retrieval + Stage 2 compatibility validation)
@@ -236,7 +238,7 @@ async def chat_endpoint(request: ChatRequest):
         else:
             cache_status = "miss"
             if route_pref == "semantic_cache":
-                telemetry_collector.record_failure(
+                fail_rec = telemetry_collector.record_failure(
                     route="semantic_cache",
                     provider="cache",
                     execution_time_ms=(time.perf_counter() - start_time) * 1000,
@@ -244,7 +246,8 @@ async def chat_endpoint(request: ChatRequest):
                 )
                 raise HTTPException(
                     status_code=404,
-                    detail="Cache miss: no compatible cached response found."
+                    detail="Cache miss: no compatible cached response found.",
+                    headers={"X-Request-ID": fail_rec.request_id}
                 )
 
     # Step 3: Determine Logical Model Tier via QueryAnalyzer & RoutingPolicy (Multi-Objective Optimization)
@@ -263,7 +266,7 @@ async def chat_endpoint(request: ChatRequest):
             raw_route = routing_policy.select_route(analysis)
             tier = raw_route if raw_route in ("small", "medium", "large") else "small"
     else:
-        telemetry_collector.record_failure(
+        fail_rec = telemetry_collector.record_failure(
             route=request.preferred_route or "invalid",
             provider="unknown",
             execution_time_ms=(time.perf_counter() - start_time) * 1000,
@@ -271,7 +274,8 @@ async def chat_endpoint(request: ChatRequest):
         )
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported route preference '{request.preferred_route}'."
+            detail=f"Unsupported route preference '{request.preferred_route}'.",
+            headers={"X-Request-ID": fail_rec.request_id}
         )
 
     # Step 4: Model Dispatcher Execution
@@ -280,13 +284,13 @@ async def chat_endpoint(request: ChatRequest):
         total_latency = (time.perf_counter() - start_time) * 1000
 
         token_usage = None
-        prompt_tokens = 0
-        completion_tokens = 0
-        total_tokens = 0
+        prompt_tokens = None
+        completion_tokens = None
+        total_tokens = None
         if resp.usage:
-            prompt_tokens = resp.usage.prompt_tokens or 0
-            completion_tokens = resp.usage.completion_tokens or 0
-            total_tokens = resp.usage.total_tokens or 0
+            prompt_tokens = resp.usage.prompt_tokens
+            completion_tokens = resp.usage.completion_tokens
+            total_tokens = resp.usage.total_tokens
             token_usage = TokenUsageSchema(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -307,9 +311,9 @@ async def chat_endpoint(request: ChatRequest):
                 route=tier_display,
                 provider=resp.provider_name,
                 model=resp.model_name,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
+                prompt_tokens=prompt_tokens or 0,
+                completion_tokens=completion_tokens or 0,
+                total_tokens=total_tokens or 0,
                 execution_time_ms=total_latency,
                 analysis=analysis
             )
@@ -367,32 +371,44 @@ async def chat_endpoint(request: ChatRequest):
             eco_receipt=receipt
         )
     except ProviderUnavailableError as pue:
-        telemetry_collector.record_failure(
+        fail_rec = telemetry_collector.record_failure(
             route=tier,
             provider="unknown",
             model=None,
             execution_time_ms=(time.perf_counter() - start_time) * 1000,
             error_message=str(pue)
         )
-        raise HTTPException(status_code=503, detail=str(pue))
+        raise HTTPException(
+            status_code=503,
+            detail=str(pue),
+            headers={"X-Request-ID": fail_rec.request_id}
+        )
     except ValueError as ve:
-        telemetry_collector.record_failure(
+        fail_rec = telemetry_collector.record_failure(
             route=tier,
             provider="unknown",
             model=None,
             execution_time_ms=(time.perf_counter() - start_time) * 1000,
             error_message=str(ve)
         )
-        raise HTTPException(status_code=400, detail=str(ve))
+        raise HTTPException(
+            status_code=400,
+            detail=str(ve),
+            headers={"X-Request-ID": fail_rec.request_id}
+        )
     except Exception as e:
-        telemetry_collector.record_failure(
+        fail_rec = telemetry_collector.record_failure(
             route=tier,
             provider="unknown",
             model=None,
             execution_time_ms=(time.perf_counter() - start_time) * 1000,
             error_message=str(e)
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+            headers={"X-Request-ID": fail_rec.request_id}
+        )
 
 @router.get("/telemetry/capabilities", response_model=MeasurementCapabilities)
 def get_telemetry_capabilities():
@@ -515,7 +531,7 @@ def get_receipt_by_id(request_id: str):
     if not rec:
         raise HTTPException(
             status_code=404,
-            detail=f"No telemetry record found for request ID '{request_id}'."
+            detail=f"No telemetry record found for request ID '{request_id}'. The record may be unknown, expired, or evicted from the in-memory retention buffer (capacity: {telemetry_collector._max_records} records)."
         )
     return generate_eco_receipt(rec)
 

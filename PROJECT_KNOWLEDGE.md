@@ -41,7 +41,7 @@ Similarly, for **"convert 100 km to miles"**:
 | **Phase 5A** | Hardware-Agnostic Telemetry & Measurement | Completed | **Yes** | Generic `MeasurementProvider` abstraction (`NvidiaNvmlProvider`, `AndroidEnergyProvider`, `AppleEnergyProvider`, `UnavailableProvider`), explicit scopes, capabilities API, 117 tests |
 | **Phase 5B** | Environmental Accounting Methodology & Upgrade | Completed | **Yes** | Multi-provider accounting, Versioned Source Registry (`registry.py`), Pluggable Cloud Energy Estimators (`cloud_estimator.py`), Ember 2024 Grid Manager (`grid.py`), 4-category Water Engine (`water.py`), Non-Zero Savings Rule (`savings.py`), 156 tests |
 | **Phase 6** | Multi-Objective Optimizer | Completed | **Yes** | Normalized Pareto cost optimization over quality, latency, cost, and energy; Non-Zero dynamic weight renormalization; hard quality constraints; live `/chat` integration, 173 tests |
-| **Phase 7** | Eco Receipt | Completed | **Yes** | Structured, machine-readable `EcoReceipt` attached to all `/chat` responses and retrievable via `GET /receipts/{id}`; itemized latency, tokens, cost, energy, carbon, water, and explainability; 186 tests |
+| **Phase 7** | Eco Receipt | Completed | **Yes** | Structured, machine-readable `EcoReceipt` attached to all `/chat` responses and retrievable via `GET /receipts/{id}`; itemized latency, tokens, cost, energy, carbon, water, and explainability; 191 tests |
 | **Phase 8** | Sustainability Dashboard | Planned | **No** | Long-term analytics, carbon-avoidance visualization |
 | **Phase 9** | Research Benchmark | Planned | **No** | 500-query evaluation suite (EcoMind-Router-500) |
 | **Phase 10** | Empirical Evaluation | Planned | **No** | Baselines (Always-Large, Always-Small, No-Cache) and ablation studies |
@@ -98,7 +98,7 @@ backend/
 │   └── telemetry.py            # Central thread-safe TelemetryCollector integrating hardware, cloud estimators, grid & water engines
 ├── config/
 │   └── settings.py             # Pydantic BaseSettings loading from .env
-└── tests/                      # 186 passing unit & integration tests
+└── tests/                      # 191 passing unit & integration tests
     ├── test_calculator.py          # Calculator arithmetic & security tests
     ├── test_unit_converter.py      # UnitConverter conversions, dimensions & edge cases
     ├── test_datetime_calculator.py  # DateTimeCalculator differences, offsets, weekdays
@@ -115,7 +115,7 @@ backend/
     ├── test_environmental_accounting.py # Phase 5B multi-provider accounting & Non-Zero Rule tests (12 tests)
     ├── test_environmental_accounting_upgrade.py # Phase 5B Upgrade source registry, cloud estimators, grid & water tests (27 tests)
     ├── test_optimizer.py           # Phase 6 Multi-Objective Optimizer & Pareto tests (17 tests)
-    └── test_eco_receipt.py         # Phase 7 Eco Receipt Generation & Explainability tests (13 tests)
+    └── test_eco_receipt.py         # Phase 7 Eco Receipt Generation & Explainability tests (18 tests)
 frontend/
 ├── src/App.tsx                 # Interactive Control Plane console with Phase 4 cache & telemetry UI
 └── package.json                # React 19, Vite, Tailwind CSS v4, Lucide React

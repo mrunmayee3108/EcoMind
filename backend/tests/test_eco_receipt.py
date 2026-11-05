@@ -59,7 +59,9 @@ class TestEcoReceipt(unittest.TestCase):
         self.assertEqual(receipt.tokens.total_tokens, 0)
         self.assertEqual(receipt.tokens.provenance, ProvenanceStatus.MEASURED)
         self.assertEqual(receipt.cost.value_usd, 0.0)
-        self.assertEqual(receipt.cost.provenance, ProvenanceStatus.MEASURED)
+        self.assertEqual(receipt.cost.provenance, ProvenanceStatus.ESTIMATED)
+        self.assertTrue(receipt.cost.is_zero_external_api_charge)
+        self.assertIn("zero external API calls", receipt.cost.details)
         self.assertEqual(receipt.latency_provenance, ProvenanceStatus.MEASURED)
         self.assertEqual(receipt.avoidance.model_calls_avoided, 1)
         self.assertFalse(receipt.avoidance.defensible_savings_reported)
@@ -82,7 +84,8 @@ class TestEcoReceipt(unittest.TestCase):
         self.assertEqual(receipt.tokens.total_tokens, 0)
         self.assertEqual(receipt.tokens.provenance, ProvenanceStatus.MEASURED)
         self.assertEqual(receipt.cost.value_usd, 0.0)
-        self.assertEqual(receipt.cost.provenance, ProvenanceStatus.MEASURED)
+        self.assertEqual(receipt.cost.provenance, ProvenanceStatus.ESTIMATED)
+        self.assertTrue(receipt.cost.is_zero_external_api_charge)
         self.assertEqual(receipt.avoidance.model_calls_avoided, 1)
         self.assertIn("precision-first semantic cache", receipt.explainability.selection_summary)
 
@@ -109,6 +112,43 @@ class TestEcoReceipt(unittest.TestCase):
         self.assertIsNotNone(receipt.cost.value_usd)
         self.assertAlmostEqual(receipt.cost.value_usd, 0.0000045, places=7)
         self.assertEqual(receipt.cost.provenance, ProvenanceStatus.ESTIMATED)
+        self.assertFalse(receipt.cost.is_zero_external_api_charge)
+
+    def test_cost_semantics_distinguishes_zero_api_charge_from_total_compute(self):
+        """Verifies zero local/tool cost denotes zero external API fees, not zero compute cost."""
+        rec = telemetry_collector.record_success(
+            route="Small Model (Local)",
+            provider="local",
+            model="local-small",
+            execution_time_ms=200.0,
+            token_usage={"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20, "is_estimated": False}
+        )
+        receipt = generate_eco_receipt(rec)
+
+        self.assertEqual(receipt.cost.value_usd, 0.0)
+        self.assertTrue(receipt.cost.is_zero_external_api_charge)
+        self.assertEqual(receipt.cost.provenance, ProvenanceStatus.ESTIMATED)
+        self.assertIn("Does not imply zero total computing", receipt.cost.details)
+        # Explainability must explain external API charges without claiming $0.00 direct measurement
+        self.assertIn("External Provider API Charges", receipt.explainability.measurement_vs_estimation)
+        self.assertNotIn("Monetary Cost ($0.00 measured)", receipt.explainability.measurement_vs_estimation)
+
+    def test_unmeasured_model_tokens_does_not_infer_zero_cost(self):
+        """When a cloud model has missing/unmeasured tokens, cost is UNAVAILABLE, not $0.00."""
+        rec = telemetry_collector.record_success(
+            route="Large Model (Gemini)",
+            provider="google",
+            model="gemini-2.5-pro",
+            execution_time_ms=500.0,
+            token_usage=None  # No usage returned
+        )
+        receipt = generate_eco_receipt(rec)
+
+        self.assertIsNone(receipt.tokens.total_tokens)
+        self.assertEqual(receipt.tokens.provenance, ProvenanceStatus.UNAVAILABLE)
+        self.assertIsNone(receipt.cost.value_usd)
+        self.assertEqual(receipt.cost.provenance, ProvenanceStatus.UNAVAILABLE)
+        self.assertIn("provider token counts are unavailable", receipt.cost.details)
 
     def test_receipt_optimizer_metadata_mapping(self):
         """Receipt accurately maps Phase 6 multi-objective routing optimizer decision metadata."""
@@ -226,6 +266,22 @@ class TestEcoReceipt(unittest.TestCase):
             self.assertAlmostEqual(receipt.environment.carbon.value_gco2e, (12.75 / 3_600_000.0) * 380.0, places=6)
             self.assertEqual(receipt.environment.carbon.grid_intensity_gco2e_per_kwh, 380.0)
 
+    def test_carbon_strictly_requires_both_energy_and_grid_intensity(self):
+        """Carbon emissions remain strictly UNAVAILABLE if energy is unmeasured, even if grid is set."""
+        rec = telemetry_collector.record_success(
+            route="Large Model (Gemini)",
+            provider="google",
+            model="gemini-2.5-pro",
+            execution_time_ms=300.0
+        )
+        # Even if environment had a grid intensity factor injected, unmeasured energy blocks carbon
+        rec.environment.grid_intensity_gco2e_per_kwh = 380.0
+        rec.environment.energy_joules = None
+        receipt = generate_eco_receipt(rec)
+
+        self.assertIsNone(receipt.environment.carbon.value_gco2e)
+        self.assertEqual(receipt.environment.carbon.provenance, ProvenanceStatus.UNAVAILABLE)
+
     def test_carbon_unavailable_when_grid_intensity_missing(self):
         """Operational carbon is strictly UNAVAILABLE if grid intensity is not configured (<= 0)."""
         gpu_telemetry = GpuTelemetry(
@@ -282,6 +338,29 @@ class TestEcoReceipt(unittest.TestCase):
         self.assertEqual(receipt.cost.provenance, ProvenanceStatus.UNAVAILABLE)
         self.assertIn("API rate limit exceeded", receipt.explainability.selection_summary)
 
+    def test_receipt_for_partial_request(self):
+        """Partial request captures preliminary operational metrics without inventing completion."""
+        rec = TelemetryRecord(
+            request_id=str(uuid.uuid4()),
+            timestamp="2026-11-05T12:00:00Z",
+            route="Small Model (Groq)",
+            provider="groq",
+            model="llama-3.1-8b-instant",
+            success=False,
+            error_message="Connection reset by peer during completion stream",
+            tokens=TokenTelemetry(input_tokens=45, output_tokens=None, total_tokens=None, provenance=ProvenanceStatus.PROVIDER_REPORTED),
+            latency=LatencyTelemetry(execution_time_ms=150.0, inference_latency_ms=140.0, provenance=ProvenanceStatus.MEASURED),
+            environment=EnvironmentalTelemetry(provenance=ProvenanceStatus.UNAVAILABLE)
+        )
+        receipt = generate_eco_receipt(rec)
+
+        self.assertEqual(receipt.status, "PARTIAL")
+        self.assertEqual(receipt.tokens.input_tokens, 45)
+        self.assertIsNone(receipt.tokens.output_tokens)
+        self.assertIsNone(receipt.cost.value_usd)
+        self.assertEqual(receipt.cost.provenance, ProvenanceStatus.UNAVAILABLE)
+        self.assertIn("partially executed", receipt.explainability.selection_summary)
+
     def test_api_chat_includes_eco_receipt(self):
         """Chat API response includes full EcoReceipt and preserves backward compatibility."""
         response = self.client.post("/chat", json={"query": "25 * 4", "preferred_route": "auto"})
@@ -305,6 +384,8 @@ class TestEcoReceipt(unittest.TestCase):
         self.assertEqual(receipt["execution_path"], "deterministic_tool")
         self.assertEqual(receipt["tokens"]["total_tokens"], 0)
         self.assertEqual(receipt["cost"]["value_usd"], 0.0)
+        self.assertEqual(receipt["cost"]["provenance"], "ESTIMATED")
+        self.assertTrue(receipt["cost"]["is_zero_external_api_charge"])
         self.assertIn("eco_receipt", data["metadata"])
 
     def test_api_receipt_retrieval_endpoint(self):
@@ -327,11 +408,31 @@ class TestEcoReceipt(unittest.TestCase):
         self.assertEqual(alias_resp.status_code, 200)
         self.assertEqual(alias_resp.json()["receipt_id"], receipt_data["receipt_id"])
 
-    def test_api_receipt_retrieval_not_found(self):
-        """GET /receipts/{request_id} returns 404 for unknown request ID."""
+    def test_api_receipt_retrieval_not_found_documents_retention_limitation(self):
+        """GET /receipts/{request_id} returns 404 with buffer retention limit documentation."""
         resp = self.client.get("/receipts/non-existent-uuid-12345")
         self.assertEqual(resp.status_code, 404)
-        self.assertIn("No telemetry record found", resp.json()["detail"])
+        detail = resp.json()["detail"]
+        self.assertIn("No telemetry record found", detail)
+        self.assertIn("retention buffer", detail)
+
+    def test_failed_request_retrieval_via_x_request_id_header(self):
+        """When an endpoint fails, it returns X-Request-ID header, allowing receipt retrieval."""
+        # Trigger an invalid route preference error (HTTP 400)
+        resp = self.client.post("/chat", json={"query": "hello", "preferred_route": "nonexistent_route"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("X-Request-ID", resp.headers)
+        req_id = resp.headers["X-Request-ID"]
+
+        # Retrieve receipt for the failed request
+        receipt_resp = self.client.get(f"/receipts/{req_id}")
+        self.assertEqual(receipt_resp.status_code, 200)
+        data = receipt_resp.json()
+        self.assertEqual(data["status"], "FAILED")
+        self.assertIsNone(data["tokens"]["total_tokens"])
+        self.assertEqual(data["tokens"]["provenance"], "UNAVAILABLE")
+        self.assertIsNone(data["cost"]["value_usd"])
+        self.assertEqual(data["cost"]["provenance"], "UNAVAILABLE")
 
     def test_receipt_serialization_roundtrip(self):
         """Receipt serializes to dict/json and validates back into Pydantic schema without error."""
@@ -350,4 +451,3 @@ class TestEcoReceipt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
