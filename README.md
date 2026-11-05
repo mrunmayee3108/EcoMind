@@ -557,8 +557,17 @@ EcoReceipt ([backend/receipt/schemas.py](backend/receipt/schemas.py))
 
 ### 3. Receipt API Endpoints
 
-* `GET /receipts/{request_id}`: Retrieve machine-readable Eco Receipt for any request ID.
+* `GET /receipts/{request_id}`: Retrieve machine-readable Eco Receipt for any request ID (queries persistent SQLite store first, falls back to in-memory buffer).
 * `GET /telemetry/receipt/{request_id}`: Canonical telemetry alias for receipt retrieval.
+
+### 4. Phase 8 Dashboard & Historical Analytics Endpoints
+
+* `GET /dashboard/summary`: High-level operational KPIs, success rate, cumulative latency, token consumption, itemized external API costs, avoided model calls, and route/provider breakdowns.
+* `GET /dashboard/environment`: Strict environmental aggregations segregating hardware-measured energy from model-based estimations, operational carbon from measured vs estimated energy, water disclosures, and active grid intensity citations.
+* `GET /dashboard/routes`: Multi-objective routing efficiency, candidate distributions, Pareto-optimal selection frequency, quality compliance, and fallback justification audit.
+* `GET /dashboard/timeseries`: Chronological time-bucketed activity, latency, token consumption, and energy trends.
+* `GET /dashboard/receipts`: Paginated, filterable Eco Receipt summary catalog with date-range, execution-path, and status filtering.
+* `GET /dashboard/receipts/{request_id}`: Full machine-readable `EcoReceipt` retrieval from SQLite with fallback to in-memory buffers.
 
 ---
 
@@ -569,13 +578,16 @@ EcoReceipt ([backend/receipt/schemas.py](backend/receipt/schemas.py))
 1. **GPU Energy vs. System Energy**: MEASURED GPU ENERGY measures only the NVIDIA GPU die and memory power draw during inference. It is **not** the total power consumed by the server or host machine (CPU, RAM, storage, cooling fans, and PSU conversion losses are excluded).
 2. **Cloud API Opacity**: Cloud providers do not disclose per-request physical energy, dynamic batch concurrency, facility locations, or cooling water. When cloud estimation is disabled or unverified, these fields are explicitly marked `UNAVAILABLE` and set to `null`.
 3. **Mobile Client Ingestion**: The backend does not directly query mobile device sensors; mobile client telemetry requires client-side transmission.
-4. **In-Memory Buffer Retention**: Telemetry and receipts reside in an in-memory retention buffer (`deque(maxlen=1000)`). If a request ID is evicted after 1,000 subsequent requests or the server restarts, retrieval returns HTTP 404 with explicit buffer eviction documentation. Persistent database archiving is scheduled for Phase 8.
+4. **Historical Database Storage**: Telemetry and Eco Receipts are now durably archived in SQLite (`database/historical_telemetry.db`), resolving the 1,000-record ring-buffer eviction limitation for completed requests and receipts. The in-memory buffer (`deque(maxlen=1000)`) is retained as an ephemeral fast cache.
 
 ### Subsequent Roadmap
 
-* **Phase 5A**: Hardware-agnostic telemetry layer & NVIDIA GPU sampling (Complete & Verified).
-* **Phase 5B**: Environmental accounting methodology, versioned source registry & pluggable cloud estimation (Complete & Verified).
+* **Phase 5A**: Hardware-agnostic telemetry layer & NVIDIA GPU sampling (Complete & Verified — 117 tests passing).
+* **Phase 5B**: Environmental accounting methodology, versioned source registry & pluggable cloud estimation (Complete & Verified — 156 tests passing).
 * **Phase 6**: Multi-objective Pareto routing optimizer (Complete & Verified — 173 tests passing).
 * **Phase 7**: Comprehensive user-facing Eco Receipts (Complete & Verified — 191 tests passing).
-* **Phase 8**: Sustainability Dashboard & Historical Aggregations (Upcoming).
+* **Phase 8**: Sustainability Dashboard & Historical Aggregations (Complete & Verified — 201 tests passing).
+* **Phase 9**: Research Benchmark — 500-query evaluation suite (EcoMind-Router-500) (Upcoming).
+* **Phase 10**: Empirical Evaluation — Baselines (Always-Large, Always-Small, No-Cache) and ablation studies (Upcoming).
+* **Phase 11**: Research Paper — Academic manuscript documenting findings (Upcoming).
 

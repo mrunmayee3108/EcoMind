@@ -643,6 +643,44 @@ EcoReceipt ([backend/receipt/schemas.py](file:///c:/Users/Mrunmayee%20Potdar/Des
 
 ---
 
+### 6.6 Dashboard & Historical Storage Schemas (Phase 8)
+
+```text
+HistoricalRequestRow (backend/database/historical_store.py)
+ ├── request_id: str (PRIMARY KEY)
+ ├── receipt_id: str (UNIQUE)
+ ├── timestamp: str (ISO-8601 UTC, INDEXED)
+ ├── status: str ("SUCCESS", "FAILED", "PARTIAL", INDEXED)
+ ├── execution_path: str ("deterministic_tool", "semantic_cache", "model_inference", INDEXED)
+ ├── route: str (INDEXED)
+ ├── provider: str (INDEXED)
+ ├── model: Optional[str]
+ ├── query_preview: Optional[str] (Truncated to 120 chars for privacy)
+ ├── execution_time_ms: float
+ ├── inference_latency_ms: Optional[float]
+ ├── latency_provenance: str ("MEASURED")
+ ├── prompt_tokens, completion_tokens, total_tokens: Optional[int]
+ ├── cost_usd: Optional[float], is_zero_external_api_charge: int
+ ├── energy_joules, energy_kwh: Optional[float]
+ ├── is_energy_measured, is_energy_estimated: int
+ ├── carbon_gco2e: Optional[float], grid_intensity_gco2e_per_kwh: Optional[float]
+ ├── water_liters: Optional[float], water_reason_unavailable: str
+ ├── model_calls_avoided, tokens_avoided: Optional[int]
+ ├── is_pareto_optimal, fallback_applied: int, fallback_reason: Optional[str]
+ ├── receipt_json: str (Full serialized EcoReceipt)
+ └── telemetry_json: str (Full serialized TelemetryRecord)
+
+DashboardSummaryResponse (backend/api/schemas_dashboard.py)
+ ├── total_requests, successful_requests, failed_requests, partial_requests: int
+ ├── success_rate_percent, total_execution_time_ms, avg_latency_ms: float
+ ├── total_prompt_tokens, total_completion_tokens, total_tokens: int
+ ├── total_external_api_cost_usd, zero_external_api_cost_count, billed_external_api_cost_count: float/int
+ ├── total_model_calls_avoided, total_tokens_avoided: int
+ └── routes_breakdown, providers_breakdown, execution_paths_breakdown: Dict[str, int]
+```
+
+---
+
 ## 7. Control Plane REST API Reference
 
 | Endpoint | Method | Input Schema | Output Schema | Architectural Role |
@@ -663,5 +701,11 @@ EcoReceipt ([backend/receipt/schemas.py](file:///c:/Users/Mrunmayee%20Potdar/Des
 | `/telemetry/clear` | `POST` | *None* | `Dict[str, Any]` | Flushes the in-memory telemetry buffer. |
 | `/router/config` | `GET` | *None* | [`RouterConfigResponse`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | Introspects active router weights ($w_Q, w_L, w_{\$}, w_E$), quality thresholds, and Pareto enablement status. |
 | `/router/optimize` | `POST` | [`RouteOptimizationRequest`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas.py) | [`RoutingDecision`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/telemetry/schemas.py) | Standalone endpoint to simulate or invoke multi-objective routing optimization over arbitrary candidate sets. |
-| `/receipts/{request_id}` | `GET` | *Path Parameter* | [`EcoReceipt`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/schemas.py) | Retrieves machine-readable Eco Receipt for any completed or failed request ID. |
+| `/receipts/{request_id}` | `GET` | *Path Parameter* | [`EcoReceipt`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/schemas.py) | Retrieves machine-readable Eco Receipt for any completed or failed request ID from SQLite (or memory fallback). |
 | `/telemetry/receipt/{request_id}` | `GET` | *Path Parameter* | [`EcoReceipt`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/schemas.py) | Canonical telemetry alias for retrieving an Eco Receipt. |
+| `/dashboard/summary` | `GET` | `start_date, end_date` | [`DashboardSummaryResponse`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas_dashboard.py) | High-level operational KPIs, success rate, cumulative latency, tokens, API costs, avoided calls, and route distributions. |
+| `/dashboard/environment` | `GET` | `start_date, end_date` | [`DashboardEnvironmentResponse`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas_dashboard.py) | Environmental footprint aggregations with strict measured vs estimated energy, carbon, water disclosures, and grid sources. |
+| `/dashboard/routes` | `GET` | `start_date, end_date` | [`DashboardRoutesResponse`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas_dashboard.py) | Multi-objective routing efficiency, candidate distributions, Pareto frontier compliance, and fallback justification audit. |
+| `/dashboard/timeseries` | `GET` | `interval, start_date, end_date` | `List[TimeseriesPoint]` | Chronological hourly or daily bucketed timeseries for volume, mean latency, tokens, measured/estimated energy, and avoidance. |
+| `/dashboard/receipts` | `GET` | `page, page_size, filters` | [`PaginatedReceiptsResponse`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas_dashboard.py) | Filterable, paginated Eco Receipt summary catalog with date-range and execution-path filtering. |
+| `/dashboard/receipts/{id}` | `GET` | *Path Parameter* | [`EcoReceipt`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/schemas.py) | Retrieves full structured Eco Receipt directly from persistent SQLite storage with in-memory fallback. |

@@ -333,14 +333,18 @@ frontend/
 - Run automated multi-objective Pareto optimization across quality ($Q$), latency ($L$), cost ($\$$), and environmental impact ($E$) with dynamic weight renormalization via `POST /router/optimize` and `/chat`.
 - Introspect router configurations, weights, and thresholds via `GET /router/config`.
 - Generate machine-readable, transparent **Eco Receipts** for all requests via `/chat` or `GET /receipts/{request_id}` with full explainability.
+- Durably store historical requests, telemetry, and Eco Receipts in SQLite (`database/historical_telemetry.db`).
+- Serve longitudinal analytics via 6 REST endpoints (`/dashboard/summary`, `/dashboard/environment`, `/dashboard/routes`, `/dashboard/timeseries`, `/dashboard/receipts`, `/dashboard/receipts/{request_id}`).
+- Render interactive sustainability trends, environmental breakdowns, Pareto routing metrics, and an Eco Receipts explorer in the React 19 frontend dashboard.
 
 ### What It CANNOT Do Yet (Future Phases)
-- Render long-term historical sustainability trends and visual dashboards (Phase 8).
 - Run evaluation suites over the 500-query research benchmark (Phase 9).
+- Execute comprehensive baseline comparisons (Always-Large, Always-Small, No-Cache) and ablation studies (Phase 10).
+- Produce the final academic manuscript with empirical findings (Phase 11).
 
 ---
 
-## 7. Why Phase 8 Is Next
+## 7. Why Phase 9 Is Next
 
-With deterministic tools (Phase 3), accuracy-first semantic cache (Phase 4), hardware-agnostic physical measurement (Phase 5A), auditable environmental accounting (Phase 5B), the multi-objective Pareto routing optimizer (Phase 6), and itemized Eco Receipts (Phase 7) fully operational, every inference request now possesses complete, auditable receipts. The next logical phase is **Phase 8: Sustainability Dashboard & Historical Aggregations**, enabling organizational tracking, cumulative carbon avoidance metrics, and longitudinal visualization across high-volume inference workloads.
+With deterministic tools (Phase 3), accuracy-first semantic cache (Phase 4), hardware-agnostic physical measurement (Phase 5A), auditable environmental accounting (Phase 5B), the multi-objective Pareto routing optimizer (Phase 6), itemized Eco Receipts (Phase 7), and the persistent Sustainability Dashboard (Phase 8) fully operational and verified across 201 backend tests, EcoMind is now a complete, functional product. The next logical phase is **Phase 9: Research Benchmark**, curating the 500-query evaluation suite (EcoMind-Router-500) across all 7 task categories to rigorously benchmark quality retention, latency reduction, cost savings, and environmental avoidance against traditional always-cloud LLM routing.
 
