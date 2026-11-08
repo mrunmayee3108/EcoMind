@@ -11,6 +11,7 @@ from models.provider import ProviderResponse, TokenUsage
 from cache.semantic_cache import semantic_cache, CacheLookupResult
 from cache.compatibility_checker import compatibility_checker
 from cache.cache_store import CacheStore, CacheEntry
+from cache.embedding_service import deterministic_test_encoder
 
 class TestSemanticCache(unittest.TestCase):
     def setUp(self):
@@ -19,11 +20,13 @@ class TestSemanticCache(unittest.TestCase):
         semantic_cache.threshold = 0.90
         semantic_cache.store.max_entries = 1000
         semantic_cache.store.ttl_days = 30
+        semantic_cache.embedder.set_custom_encoder(deterministic_test_encoder, dimension=384)
 
     def tearDown(self):
         semantic_cache.clear()
         semantic_cache.store.max_entries = 1000
         semantic_cache.store.ttl_days = 30
+        semantic_cache.embedder.set_custom_encoder(None)
 
     # --- TEST 1: Exact / Near-Equivalent Semantic Query (Cache Hit, 0 Model Calls) ---
     @patch("api.routes_chat.model_dispatcher.dispatch")
