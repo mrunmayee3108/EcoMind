@@ -5,6 +5,16 @@ Modern AI systems often send every user query to a relatively large model even w
 
 The system considers query complexity, model capability, estimated energy, water, carbon impact, and latency to optimize the execution route.
 
+## Demo Screenshots
+![alt text](image.png)
+![alt text](image-1.png)
+![alt text](image-2.png)
+![alt text](image-4.png)
+![alt text](image-6.png)
+![alt text](image-7.png)
+![alt text](image-8.png)
+![alt text](image-9.png)
+
 ## System Architecture & Flow
 1. **User Query**: Received via the API.
 2. **Query Analyzer**: Heuristically classifies task type and complexity.
