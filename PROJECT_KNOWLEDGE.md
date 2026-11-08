@@ -126,6 +126,7 @@ frontend/
 ├── src/App.tsx                 # View switcher (Playground vs Dashboard) with Eco Receipt inspection modal
 ├── src/components/             # Dashboard views: Overview, Environment, Routes, ReceiptsExplorer, ReceiptModal
 └── package.json                # React 19, Vite, Tailwind CSS v4, Lucide React, Recharts
+run_ecomind.bat                 # Unified single-command launcher for Windows (FastAPI + Vite)
 ```
 
 ---

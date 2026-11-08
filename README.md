@@ -82,9 +82,94 @@ backend/
     ├── test_dashboard.py           # Unit & integration tests for Phase 8 Historical Store & Dashboard (10 tests)
     └── test_api.py                 # Integration tests for FastAPI endpoints
 frontend/                       # React 19 + Vite 8 + Tailwind CSS v4 + Recharts dashboard
+run_ecomind.bat                 # Unified single-command launcher for Windows
 ```
 
-## Setup & Installation
+## Running EcoMind Locally
+
+EcoMind provides a unified, single-command launcher (`run_ecomind.bat`) for Windows that starts both the FastAPI backend and Vite React frontend in separate dedicated terminal windows with full prerequisite and port conflict validation.
+
+### Prerequisites
+
+* **Operating System**: Windows 10/11 (for `run_ecomind.bat`).
+* **Python**: Python 3.10+ (ensure "Add Python to PATH" is checked during installation).
+* **Node.js**: Node.js LTS v18+ (bundled with `npm`).
+* **Model Provider API Keys** (Optional for local deterministic tools, cache, and Ollama; required for cloud tiers):
+  * Groq API Key (`GROQ_API_KEY`)
+  * Google Gemini API Key (`GOOGLE_API_KEY`)
+
+### First-Time Setup Instructions
+
+Before running the launcher for the first time, set up the backend virtual environment and frontend node packages:
+
+1. **Configure Backend Environment**:
+   ```bash
+   cd backend
+   copy .env.example .env
+   ```
+   Open `backend/.env` and insert your API keys if you plan to dispatch to cloud models.
+
+2. **Set Up Python Virtual Environment**:
+   ```bash
+   python -m venv venv
+   .\venv\Scripts\activate
+   pip install -r requirements.txt
+   cd ..
+   ```
+
+3. **Install Frontend Dependencies**:
+   ```bash
+   cd frontend
+   npm install
+   cd ..
+   ```
+
+### Launching with `run_ecomind.bat`
+
+Once the initial dependencies are installed, you can launch the complete system from the project root at any time:
+
+* **From File Explorer**: Double-click `run_ecomind.bat`.
+* **From Command Prompt / PowerShell**:
+  ```cmd
+  run_ecomind.bat
+  ```
+
+The launcher will:
+1. Verify system prerequisites (`python`, `node`, `npm` in PATH).
+2. Validate backend virtual environment (`backend/venv`) and `uvicorn`.
+3. Validate frontend dependencies (`frontend/node_modules`).
+4. Check for port conflicts on port `8000` (backend) and port `5173` (frontend).
+5. Open two dedicated terminal windows:
+   * **Window 1 (Backend)**: Runs FastAPI with hot-reload via `uvicorn main:app --host 127.0.0.1 --port 8000 --reload`.
+   * **Window 2 (Frontend)**: Runs Vite dev server via `npm run dev`.
+
+### Application URLs
+
+* **Frontend Dashboard & Playground**: [http://localhost:5173](http://localhost:5173)
+* **Backend API Root**: [http://127.0.0.1:8000](http://127.0.0.1:8000)
+* **Interactive API Documentation (Swagger)**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+* **Alternative API Documentation (ReDoc)**: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
+
+### How to Stop the Application
+
+* **Stopping Services**: Press `Ctrl + C` in either terminal window to stop that service.
+* **Full Termination**: Close both terminal windows.
+
+### Common Startup Errors & Solutions
+
+| Error | Root Cause | Exact Resolution |
+|---|---|---|
+| `[ERROR] Python is not installed or not found in system PATH` | Python is missing from your system PATH | Download Python 3.10+ from [python.org](https://www.python.org/downloads/) and re-run installer, ensuring **"Add Python to PATH"** is checked. |
+| `[ERROR] Node.js is not installed or not found in system PATH` | Node.js is missing | Install Node.js LTS v18+ from [nodejs.org](https://nodejs.org/) and restart your command prompt. |
+| `[ERROR] Backend Python virtual environment not found` | Virtual environment was not created | Run `cd backend && python -m venv venv && venv\Scripts\activate && pip install -r requirements.txt`. |
+| `[ERROR] uvicorn is not installed in the virtual environment` | Backend requirements were not installed | Run `cd backend && venv\Scripts\activate && pip install -r requirements.txt`. |
+| `[ERROR] Frontend node_modules directory not found` | npm packages not installed | Run `cd frontend && npm install`. |
+| `[WARNING] Port 8000 is currently in use` | A previous backend instance or another service is bound to port 8000 | Find and terminate the process: `netstat -ano \| findstr :8000` followed by `taskkill /PID <PID> /F`. |
+| `[WARNING] Port 5173 is currently in use` | Vite dev server already running | Vite will automatically offer port `5174`, or you can terminate the existing process: `netstat -ano \| findstr :5173` followed by `taskkill /PID <PID> /F`. |
+
+---
+
+## Setup & Installation (Manual Alternative)
 
 ### Environment Variables
 Create a `.env` file in the `backend/` directory:
@@ -186,9 +271,15 @@ npm run dev
     - `GET /dashboard/timeseries`: Chronological time-bucketed activity, latency, token consumption, and energy trends.
     - `GET /dashboard/receipts`: Filterable, paginated Eco Receipt summary catalog with date-range and execution-path filtering.
     - `GET /dashboard/receipts/{request_id}`: Durable full `EcoReceipt` retrieval from SQLite with fallback to in-memory buffers.
-  - Upgraded React 19 + TypeScript frontend with unified view switcher:
-    - **Inference Playground**: Interactive chat interface with real-time routing telemetry and one-click "Inspect Eco Receipt" modal action.
-    - **Sustainability Dashboard**: 4 dedicated tabs (Overview with timeseries charts, Environmental Footprint with scope boundary disclosures, Routing & Pareto Analytics, and Receipts Explorer table with modal inspector).
+  - Upgraded React 19 + TypeScript frontend with a production-quality, light-themed SaaS experience:
+    - **Branding & Theme**: Default clean light theme with warm neutral background, emerald/forest green primary accents, soft shadows, and tagline *"Smarter AI. Lighter Footprint."*.
+    - **AI Assistant**: Welcoming conversational hero, natural prompt suggestions, keyboard execution (`Enter` submits, `Shift+Enter` newline), prominent answer card, and compact **Response Insights** with human-friendly labels.
+    - **Processing Preferences**: Clean collapsible directives for Automatic routing, Built-in Tools, Saved Responses, or Model Tiers.
+    - **Sustainability Dashboard**: 4 structured tabs:
+      1. **Overview**: Executive KPIs, activity & latency timeseries charts, and method/provider distribution bars.
+      2. **Environmental Impact**: Transparent separation of GPU-measured vs model-estimated energy, carbon calculations, water disclosures, and accounting boundaries.
+      3. **How EcoMind Works**: Understandable multi-objective routing analytics, Pareto optimal balance rate, quality compliance, and route statistics.
+      4. **Activity History**: Searchable and filterable request table with pagination, and one-click detailed **Eco Receipt** modal inspector with JSON export.
 
 ### End-to-End Execution & Telemetry Flow
 ```text

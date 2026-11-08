@@ -7,7 +7,8 @@ import {
   CheckCircle2, 
   DollarSign, 
   Server, 
-  AlertCircle 
+  Sparkles,
+  ArrowUpRight
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -24,165 +25,188 @@ interface DashboardOverviewProps {
   summary: DashboardSummaryResponse | null;
   timeseries: TimeseriesPoint[];
   loading: boolean;
+  onNavigateToHistory?: () => void;
 }
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   summary,
   timeseries,
-  loading
+  loading,
+  onNavigateToHistory
 }) => {
   if (loading) {
     return (
-      <div className="py-20 flex flex-col items-center justify-center space-y-3">
-        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-xs text-slate-400">Loading historical telemetry metrics...</p>
+      <div className="py-24 flex flex-col items-center justify-center space-y-3">
+        <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs text-slate-500 font-medium">Gathering real-time usage metrics...</p>
       </div>
     );
   }
 
   if (!summary || summary.total_requests === 0) {
     return (
-      <div className="py-20 text-center space-y-3 bg-slate-900/40 rounded-2xl border border-slate-800 p-8">
-        <div className="p-3 rounded-full bg-slate-800 inline-block text-slate-400">
-          <AlertCircle className="w-6 h-6" />
+      <div className="py-20 text-center space-y-4 bg-white/70 backdrop-blur-md rounded-3xl border border-slate-200/80 p-8 shadow-sm">
+        <div className="p-3.5 rounded-2xl bg-emerald-50 text-emerald-600 inline-block">
+          <Sparkles className="w-6 h-6" />
         </div>
-        <h4 className="text-sm font-semibold text-slate-200">No Historical Records Found</h4>
-        <p className="text-xs text-slate-400 max-w-md mx-auto">
-          Execute inference queries in the Playground to generate persistent execution telemetry and Eco Receipts.
-        </p>
+        <div className="space-y-1">
+          <h4 className="text-base font-semibold text-slate-900">No Activity Recorded Yet</h4>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto">
+            Try asking a question or running a calculation in the Playground. Your activity, savings, and Eco Receipts will appear here immediately.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {/* Card 1: Total Requests */}
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 shadow-lg">
-          <div className="flex items-center justify-between text-xs text-slate-400">
-            <span>Total Requests</span>
-            <Server className="w-4 h-4 text-emerald-400" />
+      {/* 4 Primary KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* KPI 1: Total Queries */}
+        <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between text-xs text-slate-500">
+            <span className="font-medium">Total Queries</span>
+            <div className="p-2 rounded-xl bg-slate-50 text-slate-600">
+              <Server className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl font-bold text-white mt-2">
+          <div className="text-2xl font-bold text-slate-900 mt-2 tracking-tight">
             {summary.total_requests.toLocaleString()}
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 mt-1">
-            <CheckCircle2 className="w-3 h-3" />
+          <div className="flex items-center gap-1.5 text-xs text-emerald-700 font-medium mt-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5" />
             <span>{summary.success_rate_percent.toFixed(1)}% Success Rate</span>
           </div>
         </div>
 
-        {/* Card 2: Model Calls Avoided */}
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 shadow-lg">
-          <div className="flex items-center justify-between text-xs text-slate-400">
-            <span>Model Calls Avoided</span>
-            <Layers className="w-4 h-4 text-teal-400" />
+        {/* KPI 2: Zero-Inference Answers */}
+        <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between text-xs text-slate-500">
+            <span className="font-medium">Model Calls Avoided</span>
+            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
+              <Layers className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl font-bold text-emerald-400 mt-2">
+          <div className="text-2xl font-bold text-emerald-600 mt-2 tracking-tight">
             {summary.total_model_calls_avoided.toLocaleString()}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            Directly satisfied via cache/tools
+          <p className="text-xs text-slate-500 mt-1.5">
+            Answered via built-in tools & cache
           </p>
         </div>
 
-        {/* Card 3: Avg Execution Latency */}
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 shadow-lg">
-          <div className="flex items-center justify-between text-xs text-slate-400">
-            <span>Mean Latency</span>
-            <Clock className="w-4 h-4 text-cyan-400" />
+        {/* KPI 3: Avg Response Time */}
+        <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between text-xs text-slate-500">
+            <span className="font-medium">Average Response Time</span>
+            <div className="p-2 rounded-xl bg-cyan-50 text-cyan-600">
+              <Clock className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl font-bold text-white mt-2">
-            {summary.avg_latency_ms.toFixed(1)} <span className="text-xs font-normal text-slate-400">ms</span>
+          <div className="text-2xl font-bold text-slate-900 mt-2 tracking-tight">
+            {summary.avg_latency_ms.toFixed(1)} <span className="text-xs font-normal text-slate-500">ms</span>
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            Total {(summary.total_execution_time_ms / 1000).toFixed(2)}s compute
+          <p className="text-xs text-slate-500 mt-1.5">
+            {(summary.total_execution_time_ms / 1000).toFixed(2)}s total compute
           </p>
         </div>
 
-        {/* Card 4: External API Cost */}
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 shadow-lg">
-          <div className="flex items-center justify-between text-xs text-slate-400">
-            <span>External API Cost</span>
-            <DollarSign className="w-4 h-4 text-amber-400" />
+        {/* KPI 4: External API Cost */}
+        <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between text-xs text-slate-500">
+            <span className="font-medium">External API Charges</span>
+            <div className="p-2 rounded-xl bg-amber-50 text-amber-600">
+              <DollarSign className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl font-bold text-white mt-2">
+          <div className="text-2xl font-bold text-slate-900 mt-2 tracking-tight">
             ${summary.total_external_api_cost_usd.toFixed(6)}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            {summary.zero_external_api_cost_count} requests with $0 charges
+          <p className="text-xs text-slate-500 mt-1.5">
+            <strong className="text-emerald-700 font-semibold">{summary.zero_external_api_cost_count}</strong> queries with $0 API fees
           </p>
         </div>
       </div>
 
-      {/* Timeseries Graph: Volume & Latency */}
+      {/* Activity Timeline Chart */}
       {timeseries.length > 0 && (
-        <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 shadow-xl space-y-4">
-          <div className="flex items-center justify-between">
+        <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h4 className="text-sm font-semibold text-white">Execution Activity & Latency Timeline</h4>
-              <p className="text-xs text-slate-400">Historical request volume and average execution time</p>
+              <h4 className="text-sm font-bold text-slate-900">Query Activity & Response Time Over Time</h4>
+              <p className="text-xs text-slate-500 mt-0.5">Chronological request volume and latency distribution</p>
             </div>
-            <div className="flex items-center gap-4 text-xs">
-              <span className="flex items-center gap-1.5 text-emerald-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Requests
+            <div className="flex items-center gap-4 text-xs font-medium">
+              <span className="flex items-center gap-1.5 text-emerald-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" /> Requests
               </span>
-              <span className="flex items-center gap-1.5 text-cyan-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" /> Latency (ms)
+              <span className="flex items-center gap-1.5 text-cyan-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-cyan-500" /> Response Time (ms)
               </span>
             </div>
           </div>
-          <div className="h-64 w-full">
+
+          <div className="h-64 w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={timeseries} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
-                  <linearGradient id="reqGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.0}/>
+                  <linearGradient id="reqGradLight" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#059669" stopOpacity={0.25}/>
+                    <stop offset="95%" stopColor="#059669" stopOpacity={0.0}/>
                   </linearGradient>
-                  <linearGradient id="latGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#22d3ee" stopOpacity={0.0}/>
+                  <linearGradient id="latGradLight" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.2}/>
+                    <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.0}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} />
-                <XAxis dataKey="time_bucket" stroke="#64748b" fontSize={11} />
-                <YAxis yAxisId="left" stroke="#10b981" fontSize={11} />
-                <YAxis yAxisId="right" orientation="right" stroke="#22d3ee" fontSize={11} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="time_bucket" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                <YAxis yAxisId="left" stroke="#059669" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis yAxisId="right" orientation="right" stroke="#06b6d4" fontSize={11} tickLine={false} axisLine={false} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.75rem', fontSize: '12px' }}
+                  contentStyle={{ 
+                    backgroundColor: '#ffffff', 
+                    borderColor: '#e2e8f0', 
+                    borderRadius: '1rem', 
+                    fontSize: '12px',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)'
+                  }}
                 />
-                <Area yAxisId="left" type="monotone" dataKey="request_count" stroke="#10b981" fillOpacity={1} fill="url(#reqGrad)" name="Requests" />
-                <Area yAxisId="right" type="monotone" dataKey="avg_latency_ms" stroke="#22d3ee" fillOpacity={1} fill="url(#latGrad)" name="Avg Latency (ms)" />
+                <Area yAxisId="left" type="monotone" dataKey="request_count" stroke="#059669" strokeWidth={2} fillOpacity={1} fill="url(#reqGradLight)" name="Queries" />
+                <Area yAxisId="right" type="monotone" dataKey="avg_latency_ms" stroke="#06b6d4" strokeWidth={2} fillOpacity={1} fill="url(#latGradLight)" name="Avg Latency (ms)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
       )}
 
-      {/* Breakdowns Grid */}
+      {/* Breakdown Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {/* Execution Paths Breakdown */}
-        <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 shadow-xl space-y-3">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-teal-400" /> Execution Paths
-          </h4>
-          <div className="space-y-2">
+        {/* Processing Methods */}
+        <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-teal-600" /> Processing Method
+            </h4>
+          </div>
+          <div className="space-y-3">
             {Object.entries(summary.execution_paths_breakdown).map(([path, count]) => {
               const pct = (count / summary.total_requests) * 100;
+              const formattedName = path === 'deterministic_tool' ? 'Built-in Tools' :
+                                    path === 'semantic_cache' ? 'Saved Responses' : 'AI Model Inference';
               return (
-                <div key={path} className="space-y-1">
+                <div key={path} className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-300 font-mono capitalize">{path.replace('_', ' ')}</span>
-                    <span className="text-slate-400">{count} ({pct.toFixed(1)}%)</span>
+                    <span className="text-slate-700 font-medium">{formattedName}</span>
+                    <span className="text-slate-500">{count} ({pct.toFixed(0)}%)</span>
                   </div>
-                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                     <div 
-                      className={`h-full rounded-full ${
-                        path === 'deterministic_tool' ? 'bg-cyan-400' :
-                        path === 'semantic_cache' ? 'bg-emerald-400' :
-                        'bg-purple-400'
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        path === 'deterministic_tool' ? 'bg-cyan-500' :
+                        path === 'semantic_cache' ? 'bg-emerald-500' :
+                        'bg-indigo-500'
                       }`}
                       style={{ width: `${pct}%` }}
                     />
@@ -193,23 +217,23 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
         </div>
 
-        {/* Route Distribution */}
-        <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 shadow-xl space-y-3">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-            <Cpu className="w-3.5 h-3.5 text-purple-400" /> Route Distribution
+        {/* Selected Routes */}
+        <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm space-y-4">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+            <Cpu className="w-3.5 h-3.5 text-indigo-600" /> Route Distribution
           </h4>
-          <div className="space-y-2">
-            {Object.entries(summary.routes_breakdown).map(([route, count]) => {
+          <div className="space-y-3">
+            {Object.entries(summary.routes_breakdown).slice(0, 5).map(([route, count]) => {
               const pct = (count / summary.total_requests) * 100;
               return (
-                <div key={route} className="space-y-1">
+                <div key={route} className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-300 truncate max-w-[180px]">{route}</span>
-                    <span className="text-slate-400">{count} ({pct.toFixed(0)}%)</span>
+                    <span className="text-slate-700 font-medium truncate max-w-[170px]" title={route}>{route}</span>
+                    <span className="text-slate-500">{count} ({pct.toFixed(0)}%)</span>
                   </div>
-                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                     <div 
-                      className="h-full bg-emerald-500 rounded-full" 
+                      className="h-full bg-emerald-600 rounded-full transition-all duration-500" 
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -219,23 +243,25 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
         </div>
 
-        {/* Providers Breakdown */}
-        <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 shadow-xl space-y-3">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-            <Zap className="w-3.5 h-3.5 text-amber-400" /> Provider Breakdown
+        {/* AI Providers */}
+        <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm space-y-4">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+            <Zap className="w-3.5 h-3.5 text-amber-600" /> Provider Distribution
           </h4>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {Object.entries(summary.providers_breakdown).map(([provider, count]) => {
               const pct = (count / summary.total_requests) * 100;
+              const displayProvider = provider === 'deterministic' ? 'Built-in Tool' :
+                                      provider === 'cache' ? 'Saved Response' : provider;
               return (
-                <div key={provider} className="space-y-1">
+                <div key={provider} className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-300 capitalize">{provider}</span>
-                    <span className="text-slate-400">{count} ({pct.toFixed(0)}%)</span>
+                    <span className="text-slate-700 font-medium capitalize">{displayProvider}</span>
+                    <span className="text-slate-500">{count} ({pct.toFixed(0)}%)</span>
                   </div>
-                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                     <div 
-                      className="h-full bg-teal-400 rounded-full" 
+                      className="h-full bg-teal-500 rounded-full transition-all duration-500" 
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -245,6 +271,18 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
         </div>
       </div>
+
+      {onNavigateToHistory && (
+        <div className="flex justify-end pt-2">
+          <button
+            onClick={onNavigateToHistory}
+            className="text-xs text-emerald-700 hover:text-emerald-800 font-medium flex items-center gap-1 transition-colors"
+          >
+            <span>View detailed activity history</span>
+            <ArrowUpRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };
