@@ -15,9 +15,10 @@ The system considers query complexity, model capability, estimated energy, water
 7. **Eco Receipt Generation**: Returns the answer with a detailed environmental impact breakdown.
 
 ## Environmental Methodology & Research Integrity
-- **Authentic Telemetry**: We record actual measured values (execution latency, API prompt/candidate tokens).
-- **Zero Fabrication**: Environmental values (energy, water, carbon) are never fabricated or populated with fake hardcoded constants. They will be integrated via peer-reviewed estimation models in Phase 5.
-- **Large-Model Inference Avoidance**: Deterministic tools (e.g. AST Calculator) solve calculable tasks with 0 token consumption, bypassing neural network inference entirely.
+- **Authentic Telemetry**: We record actual measured values (execution latency, authentic API prompt/completion tokens, and local NVIDIA GPU hardware sensor power via NVML).
+- **Evidence-Grounded Cloud Estimation (Phase 5B)**: When `ENABLE_CLOUD_ENERGY_ESTIMATION=true`, cloud LLM energy is estimated using peer-reviewed empirical models (**ML.ENERGY Leaderboard v3.0** on NVIDIA H100 testbeds and **EcoLogits LCA**). Output is strictly badged as `ESTIMATED` with uncertainty bounds ($\pm 20\%$) and upstream citations.
+- **Strict Anti-Fabrication Safeguard**: Because commercial cloud providers treat data center locations and cooling facility designs as trade secrets, direct water consumption and cloud grid carbon are truthfully disclaimed rather than guessing.
+- **Large-Model Inference Avoidance**: Deterministic tools (e.g. AST Calculator, Unit Converter, DateTime) solve calculable tasks with 0 token consumption, bypassing neural network inference entirely.
 
 ## Project Structure
 ```text

@@ -327,7 +327,7 @@ run_ecomind.bat                 # Unified single-command launcher for Windows (F
 - Introspect registered tools (`GET /tools`), model profiles (`GET /models`), cache statistics (`GET /cache/stats`), and telemetry (`GET /telemetry/summary`, `GET /telemetry/recent`, `GET /telemetry/capabilities`).
 - Audit versioned environmental accounting sources, citations, and freshness statuses via `GET /telemetry/sources` and `GET /telemetry/sources/{id}`.
 - Trigger automatic freshness audits via `POST /telemetry/sources/refresh`.
-- Estimate cloud energy via pluggable estimators (`MLEnergyEstimator` empirical v3.0, `EcoLogitsEstimator` LCA model) when `ENABLE_CLOUD_ENERGY_ESTIMATION=True`.
+- Estimate cloud energy via pluggable estimators (`MLEnergyEstimator` empirical v3.0, `EcoLogitsEstimator` LCA model) when `ENABLE_CLOUD_ENERGY_ESTIMATION=True` (configured and active in `backend/.env`).
 - Dynamically manage grid carbon intensity across regional grids (Ember Climate 2024 fallbacks for US, US-CA, IN, DE, FR, UK, EU, GLOBAL) via `GET /telemetry/grid`.
 - Safeguard water metrics across 4 discrete scopes (direct evaporative, indirect power, supply chain, total lifecycle) and preserve anti-fabrication standards.
 - Compute pair-wise savings comparisons via `POST /telemetry/savings/compare`, enforcing the Non-Zero Rule, comparison types, and quality degradation penalties.
@@ -336,7 +336,8 @@ run_ecomind.bat                 # Unified single-command launcher for Windows (F
 - Generate machine-readable, transparent **Eco Receipts** for all requests via `/chat` or `GET /receipts/{request_id}` with full explainability.
 - Durably store historical requests, telemetry, and Eco Receipts in SQLite (`database/historical_telemetry.db`).
 - Serve longitudinal analytics via 6 REST endpoints (`/dashboard/summary`, `/dashboard/environment`, `/dashboard/routes`, `/dashboard/timeseries`, `/dashboard/receipts`, `/dashboard/receipts/{request_id}`).
-- Render interactive sustainability trends, environmental breakdowns, Pareto routing metrics, and an Eco Receipts explorer in the React 19 frontend dashboard.
+- Deliver a modern, light-themed SaaS user interface (React 19 + TypeScript + Tailwind CSS v4) featuring a welcoming AI Assistant, conversational prompt suggestions, human-friendly **Response Insights**, and a 4-tab Sustainability Dashboard with Eco Receipt inspection.
+- Launch the entire full-stack platform locally through a unified single-command script (`run_ecomind.bat`).
 
 ### What It CANNOT Do Yet (Future Phases)
 - Run evaluation suites over the 500-query research benchmark (Phase 9).

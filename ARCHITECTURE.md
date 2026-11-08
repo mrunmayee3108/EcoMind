@@ -73,7 +73,7 @@ User Query
 
 ---
 
-## 2. Current Implemented Architecture (Phase 7 Actual)
+## 2. Current Implemented Architecture (Phase 8 Actual)
 
 The diagram below reflects the active control plane execution graph implemented across the backend:
 
@@ -157,12 +157,15 @@ ModelDispatcher.dispatch(tier, query)
   ├── GroqProvider (Groq LPU API)
   │     • Authentic token usage from response.usage (PROVIDER_REPORTED)
   │     • Wall-clock latency measured via time.perf_counter (MEASURED)
-  │     • Cloud energy, water, carbon: UNAVAILABLE (Scope: CLOUD_INFERENCE)
+  │     • Cloud energy: ESTIMATED via MLEnergyEstimator / EcoLogits when ENABLE_CLOUD_ENERGY_ESTIMATION=True
+  │       (labeled ESTIMATED, Scope: CLOUD_INFERENCE, +/-20% uncertainty)
+  │     • Cloud water & carbon: UNAVAILABLE without remote datacenter facility disclosures (Anti-fabrication safeguard)
   │
   ├── GeminiProvider (Google GenAI SDK)
   │     • Authentic tokens from response.usage_metadata (PROVIDER_REPORTED)
   │     • Wall-clock latency measured via time.perf_counter (MEASURED)
-  │     • Cloud energy, water, carbon: UNAVAILABLE (Scope: CLOUD_INFERENCE)
+  │     • Cloud energy: ESTIMATED via MLEnergyEstimator / EcoLogits when ENABLE_CLOUD_ENERGY_ESTIMATION=True
+  │     • Cloud water & carbon: UNAVAILABLE without remote datacenter facility disclosures
   │
   └── LocalProvider (Local Ollama Daemon + MeasurementProvider Sampling)
         • Authentic tokens from Ollama eval_count (PROVIDER_REPORTED)
@@ -709,3 +712,42 @@ DashboardSummaryResponse (backend/api/schemas_dashboard.py)
 | `/dashboard/timeseries` | `GET` | `interval, start_date, end_date` | `List[TimeseriesPoint]` | Chronological hourly or daily bucketed timeseries for volume, mean latency, tokens, measured/estimated energy, and avoidance. |
 | `/dashboard/receipts` | `GET` | `page, page_size, filters` | [`PaginatedReceiptsResponse`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas_dashboard.py) | Filterable, paginated Eco Receipt summary catalog with date-range and execution-path filtering. |
 | `/dashboard/receipts/{id}` | `GET` | *Path Parameter* | [`EcoReceipt`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/schemas.py) | Retrieves full structured Eco Receipt directly from persistent SQLite storage with in-memory fallback. |
+
+---
+
+## 8. Frontend Architecture & UI/UX Design System
+
+EcoMind features a production-grade, light-themed SaaS frontend built with **React 19**, **TypeScript**, **Vite 8**, **Tailwind CSS v4**, and **Recharts**.
+
+### 8.1 Visual & Structural Guidelines
+- **Palette**: Clean light neutral canvas (`#f8fafc`), white card elevations (`#ffffff`), slate text hierarchies (`#0f172a`, `#475569`, `#94a3b8`), and primary emerald/teal accents (`#059669`, `#0d9488`).
+- **Brand Identity**: Application title **EcoMind** with tagline *"Smarter AI. Lighter Footprint."*. Developer phase labels are excluded from end-user UI.
+- **Human-Friendly Terminology**:
+  - *Deterministic Tool* $\rightarrow$ **Instant Built-in Tool**
+  - *Semantic Cache* $\rightarrow$ **Saved Response**
+  - *Execution Telemetry* $\rightarrow$ **Response Insights**
+  - *Multi-Objective Routing Optimizer* $\rightarrow$ **How EcoMind Works**
+  - *Eco Receipts Explorer* $\rightarrow$ **Activity History**
+
+### 8.2 Component Hierarchy
+```text
+frontend/src/
+├── App.tsx                     # Top navigation, System Ready pill, view state switcher
+│    │
+│    ├── [View 1: AI Assistant / Playground]
+│    │    ├── Hero greeting & natural prompt suggestion chips
+│    │    ├── Textarea input with Enter-to-submit and Shift+Enter newline
+│    │    ├── Collapsible "Processing Preferences" (Automatic, Built-in Tool, Saved Response, Model Tiers)
+│    │    ├── Primary Answer Card with Copy feedback button
+│    │    ├── Compact "Response Insights" (Latency, Avoided Tokens, Energy Status, Cost, "View Eco Receipt")
+│    │    └── Value proposition cards explaining algorithmic savings
+│    │
+│    ├── [View 2: Sustainability Dashboard]
+│    │    ├── Time range selector ('24h', '7d', '30d', 'All Time') & refresh action
+│    │    ├── DashboardOverview.tsx      # 4 KPI cards, Recharts area chart, method breakdown bars
+│    │    ├── DashboardEnvironment.tsx   # GPU-measured vs model-estimated energy, carbon & water disclosures
+│    │    ├── DashboardRoutes.tsx        # Pareto balance rate, quality compliance, route statistics table
+│    │    └── ReceiptsExplorer.tsx       # Paginated, filterable activity history table with modal trigger
+│    │
+│    └── ReceiptModal.tsx       # Invoice-style modal with plain-English summary, key tiles, & JSON copy
+```
