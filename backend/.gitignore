@@ -1,3 +1,19 @@
+# Environment variables
 .env
-.__pycache__
+.env.local
+.env.*
+!.env.example
+
+# Python cache & virtual environment
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 venv/
+.venv/
+
+# Local databases and cache indexes
+database/*.db
+database/*.db-journal
+database/*.index
+database/*.lock

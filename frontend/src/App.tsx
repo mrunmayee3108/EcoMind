@@ -38,7 +38,7 @@ import { DashboardEnvironment } from './components/DashboardEnvironment.tsx';
 import { DashboardRoutes } from './components/DashboardRoutes.tsx';
 import { ReceiptsExplorer } from './components/ReceiptsExplorer.tsx';
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://127.0.0.1:8000";
 
 type ActiveView = 'playground' | 'dashboard';
 type DashboardTab = 'overview' | 'environment' | 'routes' | 'receipts';

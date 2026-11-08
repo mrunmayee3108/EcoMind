@@ -751,3 +751,50 @@ frontend/src/
 │    │
 │    └── ReceiptModal.tsx       # Invoice-style modal with plain-English summary, key tiles, & JSON copy
 ```
+
+---
+
+## 9. Containerization, Compose & CI Pipeline Infrastructure
+
+EcoMind provides zero-configuration containerization using Docker & Docker Compose alongside a multi-stage GitHub Actions Continuous Integration pipeline.
+
+### 9.1 Container Orchestration Topology
+
+```mermaid
+graph TD
+    Client["User Browser (http://localhost:5173)"] -->|HTTP Port 5173| FrontendCont["ecomind-frontend Container (Nginx:Alpine)"]
+    FrontendCont -->|Static File Serving| SPA["Compiled React 19 Bundle (/usr/share/nginx/html)"]
+    FrontendCont -->|Reverse Proxy /api/ & /chat| BackendCont["ecomind-backend Container (FastAPI)"]
+    BackendCont -->|FastAPI Control Plane :8000| Core["Router, Optimizer, Telemetry & Accounting Engine"]
+    BackendCont -->|Persistent Mount /app/database| Volume[("Named Volume: ecomind-database-volume")]
+    Volume -->|SQLite Storage| HistDB["historical_telemetry.db"]
+    Volume -->|FAISS & SQLite| CacheDB["semantic_cache.db & semantic_cache.index"]
+```
+
+### 9.2 Docker Specifications
+1. **Backend (`backend/Dockerfile`)**:
+   - Base: Official `python:3.10-slim`.
+   - Security: Runs as dedicated unprivileged user `ecomind` (UID 1000).
+   - Layer Caching: `requirements.txt` installed before copying application code.
+   - Database Storage: Pre-creates `/app/database` with non-root ownership.
+   - Entrypoint: `uvicorn main:app --host 0.0.0.0 --port 8000`.
+   - Healthcheck: Automated periodic polling via `curl -f http://localhost:8000/`.
+
+2. **Frontend (`frontend/Dockerfile`)**:
+   - Multi-stage:
+     - Stage 1 (`node:20-alpine`): Reproducible `npm ci`, type validation, and Vite bundle generation.
+     - Stage 2 (`nginx:alpine`): Production-grade static asset server with custom `nginx.conf`.
+   - Reverse Proxy: Nginx proxies `/api/` and core API routes directly to the `backend` container on Docker's bridge network.
+   - SPA Fallback: Directs client-side paths to `index.html`.
+
+3. **Compose (`docker-compose.yml`)**:
+   - Manages service lifecycle with `restart: unless-stopped` and automatic container naming.
+   - Connects both services via isolated bridge network `ecomind-network`.
+   - Persists all SQLite databases across restarts via named volume `ecomind-database-volume`.
+   - Ingests credentials from root or backend `.env` files safely without baking secrets into images.
+
+### 9.3 GitHub Actions CI Pipeline (`.github/workflows/ci.yml`)
+- Triggered automatically on `push` and `pull_request` to `main`.
+- **Job 1 (`backend-ci`)**: Runs Ubuntu latest, Python 3.10, dependency caching, and full 201-unit-test suite with mock credentials and offline model verification.
+- **Job 2 (`frontend-ci`)**: Runs Ubuntu latest, Node.js 20, `npm ci`, strict TypeScript typecheck (`npx tsc -b`), and production Vite bundle.
+- **Job 3 (`docker-verification`)**: Dependent on jobs 1 and 2; tests building backend and frontend Docker containers cleanly. Pure CI validation with zero external pushes or deployments.

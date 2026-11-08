@@ -170,6 +170,138 @@ The launcher will:
 
 ---
 
+## Docker Setup & Containerization
+
+EcoMind provides complete containerization via Docker and Docker Compose for reproducible, zero-configuration local runs across Windows, macOS, and Linux.
+
+### Container Architecture
+
+```
+                      ┌──────────────────────────────────────┐
+                      │             User Browser             │
+                      └──────────────────┬───────────────────┘
+                                         │ http://localhost:5173
+                                         ▼
+                 ┌──────────────────────────────────────────────────┐
+                 │       ecomind-frontend Container (Nginx)         │
+                 │   - Serves React 19 SPA static assets            │
+                 │   - Reverse-proxies /api/ and API routes         │
+                 └───────────────────────┬──────────────────────────┘
+                                         │ http://backend:8000
+                                         ▼
+                 ┌──────────────────────────────────────────────────┐
+                 │        ecomind-backend Container (FastAPI)       │
+                 │   - Multi-Objective Routing Optimizer            │
+                 │   - Environmental Accounting & Telemetry Engine  │
+                 │   - Non-root user: ecomind (UID 1000)            │
+                 └───────────────────────┬──────────────────────────┘
+                                         │ Mounts: /app/database
+                                         ▼
+                 ┌──────────────────────────────────────────────────┐
+                 │    Named Volume: ecomind-database-volume         │
+                 │   - historical_telemetry.db (Phase 8 SQLite)     │
+                 │   - semantic_cache.db & semantic_cache.index     │
+                 └──────────────────────────────────────────────────┘
+```
+
+### Docker Prerequisites
+
+* **Docker Desktop** (Windows/macOS) or **Docker Engine & Docker Compose v2** (Linux).
+* Verify installation:
+  ```bash
+  docker --version
+  docker-compose --version
+  ```
+
+### Quickstart with Docker Compose
+
+1. **Configure Environment Variables**:
+   Copy the example environment file to `.env` in the project root:
+   ```bash
+   cp .env.example .env
+   # On Windows Command Prompt:
+   copy .env.example .env
+   ```
+   Add your `GROQ_API_KEY` (and optional `GOOGLE_API_KEY`) to `.env`.
+
+2. **Build and Start All Services**:
+   ```bash
+   docker-compose up --build
+   ```
+   *(Or `docker compose up --build` if using the Docker Compose plugin).*
+
+   To run in the background (detached mode):
+   ```bash
+   docker-compose up -d --build
+   ```
+
+3. **Access the Applications**:
+   * **Frontend Web Application**: [http://localhost:5173](http://localhost:5173)
+   * **Backend API & Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+   * **Backend Health Check**: [http://localhost:8000/](http://localhost:8000/)
+
+4. **View Container Logs**:
+   ```bash
+   # Follow all logs
+   docker-compose logs -f
+
+   # Follow backend logs only
+   docker-compose logs -f backend
+   ```
+
+5. **Stop the Application**:
+   ```bash
+   docker-compose down
+   ```
+   *Note: Stopping containers does **not** erase your data. Your SQLite databases remain safely preserved in the named Docker volume.*
+
+### Database Persistence & Data Volume
+
+All historical telemetry records, Eco Receipts, and FAISS vector cache indexes are stored in the persistent named volume `ecomind-database-volume` mounted at `/app/database`.
+
+* Rebuilding containers (`docker-compose up --build`) preserves all historical data.
+* To reset all stored data if needed:
+  ```bash
+  docker-compose down -v
+  ```
+
+### Hardware Telemetry in Docker (NVIDIA NVML)
+
+EcoMind includes native NVIDIA NVML telemetry via low-level C-library bindings (`ctypes.CDLL`).
+
+* **Standard Containers (Default)**: In standard CPU container environments without GPU passthrough, NVML access is gracefully unavailable. EcoMind's `UnavailableProvider` reports physical GPU energy as `UNAVAILABLE` with zero fabricated metrics (strictly adhering to the Anti-Fabrication Safeguard). Cloud estimation (ML.ENERGY / EcoLogits) continues to function as configured.
+* **NVIDIA GPU Passthrough**: If running on a host with an NVIDIA GPU and the **NVIDIA Container Toolkit** installed, GPU sampling can be enabled by passing `--gpus all` or configuring the NVIDIA runtime in Compose.
+
+---
+
+## GitHub Actions Continuous Integration (CI) Pipeline
+
+EcoMind includes a fully automated Continuous Integration pipeline defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml). The pipeline automatically runs on every `push` and `pull_request` targeting the `main` branch.
+
+### CI Workflow Architecture
+
+The CI pipeline consists of 3 distinct, parallel and dependent jobs:
+
+1. **`backend-ci` (Backend Test Suite & Type Verification)**:
+   * Sets up Python 3.10 with pip dependency caching.
+   * Installs all dependencies from `backend/requirements.txt`.
+   * Executes the complete unit test suite (201 passing tests across all components) using dummy API credentials and offline huggingface flags (`HF_HUB_OFFLINE=1`).
+   * Validates: Deterministic tools, Query Analyzer, Model Dispatcher, Semantic Cache, Multi-Objective Optimizer, Environmental Accounting, and Historical Telemetry Store.
+
+2. **`frontend-ci` (TypeScript Validation & Production Build)**:
+   * Sets up Node.js 20 with npm package caching.
+   * Executes clean dependency installation via `npm ci`.
+   * Runs strict TypeScript type checking (`npx tsc -b`) to verify zero type errors.
+   * Builds the production Vite bundle (`npm run build`) to ensure zero asset compilation issues.
+
+3. **`docker-verification` (Container Build Verification)**:
+   * Runs after `backend-ci` and `frontend-ci` pass successfully.
+   * Tests multi-stage Docker builds for both `backend/Dockerfile` and `frontend/Dockerfile`.
+   * Validates Docker layer caching, dependency resolution, and non-root user configuration inside Linux containers.
+   * **Strictly CI verification only**: No external image pushing or public deployment.
+
+---
+
 ## Setup & Installation (Manual Alternative)
 
 ### Environment Variables

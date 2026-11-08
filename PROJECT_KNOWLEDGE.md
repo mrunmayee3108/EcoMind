@@ -46,6 +46,8 @@ Similarly, for **"convert 100 km to miles"**:
 | **Local Launcher** | Automated Windows Runner | Completed | **Yes** | Single batch file (`run_ecomind.bat`) with venv activation, npm package validation, port conflict checks, and live dual terminal launching |
 | **UI/UX Redesign** | Modern Light SaaS Interface | Completed | **Yes** | Conversational AI Assistant, prompt suggestions, keyboard shortcuts, Answer Card, Response Insights, 4-tab Sustainability Dashboard, and Eco Receipt modal |
 | **Cloud Estimation** | Evidence-Grounded Estimation | Completed | **Yes** | ML.ENERGY Leaderboard v3.0 / EcoLogits adapters active via `ENABLE_CLOUD_ENERGY_ESTIMATION=true` in `backend/.env` with strict `ESTIMATED` labeling |
+| **Docker & Compose** | Containerized Reproducibility | Completed | **Yes** | Production Dockerfiles (`python:3.10-slim` non-root user & `node:20`/`nginx:alpine`), `docker-compose.yml`, named persistent SQLite volume `ecomind-database-volume` |
+| **GitHub Actions CI** | Automated Continuous Integration | Completed | **Yes** | 3-job CI pipeline (`backend-ci` 201 tests, `frontend-ci` TypeScript & Vite build, `docker-verification` multi-stage build tests) on push and PR to `main` |
 
 ---
 
@@ -338,10 +340,12 @@ run_ecomind.bat                 # Unified single-command launcher for Windows (F
 - Serve longitudinal analytics via 6 REST endpoints (`/dashboard/summary`, `/dashboard/environment`, `/dashboard/routes`, `/dashboard/timeseries`, `/dashboard/receipts`, `/dashboard/receipts/{request_id}`).
 - Deliver a modern, light-themed SaaS user interface (React 19 + TypeScript + Tailwind CSS v4) featuring a welcoming AI Assistant, conversational prompt suggestions, human-friendly **Response Insights**, and a 4-tab Sustainability Dashboard with Eco Receipt inspection.
 - Launch the entire full-stack platform locally through a unified single-command script (`run_ecomind.bat`).
+- Run the full-stack system reproducibly in any environment using Docker and Docker Compose (`docker-compose up --build`) with automatic reverse-proxying, non-root backend execution, and persistent SQLite storage.
+- Automatically validate all 201 backend tests, strict TypeScript types, frontend builds, and Docker container builds on every push and pull request via GitHub Actions CI (`.github/workflows/ci.yml`).
 
 ---
 
 ## 7. Current System State & Production Readiness
 
-With deterministic tools (Phase 3), accuracy-first semantic cache (Phase 4), hardware-agnostic physical measurement (Phase 5A), auditable environmental accounting and cloud estimation (Phase 5B), the multi-objective Pareto routing optimizer (Phase 6), itemized Eco Receipts (Phase 7), persistent SQLite telemetry storage and the 4-tab Sustainability Dashboard (Phase 8), unified single-command launcher (`run_ecomind.bat`), and modern light-theme SaaS interface, **EcoMind is fully functional, complete, and verified across all 201 backend tests with 0 frontend compilation warnings or errors.**
+With deterministic tools (Phase 3), accuracy-first semantic cache (Phase 4), hardware-agnostic physical measurement (Phase 5A), auditable environmental accounting and cloud estimation (Phase 5B), the multi-objective Pareto routing optimizer (Phase 6), itemized Eco Receipts (Phase 7), persistent SQLite telemetry storage and the 4-tab Sustainability Dashboard (Phase 8), unified single-command launcher (`run_ecomind.bat`), modern light-theme SaaS interface, Docker containerization with Compose orchestration, and an automated GitHub Actions CI pipeline, **EcoMind is fully functional, complete, and verified across all 201 backend tests with 0 frontend compilation warnings or errors.**
 

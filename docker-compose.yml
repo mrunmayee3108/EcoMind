@@ -1,0 +1,70 @@
+# =============================================================================
+# EcoMind — Docker Compose Orchestration
+# Services:
+#   1. backend  — FastAPI Control Plane & Telemetry Engine (Port 8000)
+#   2. frontend — Vite React SPA served via Nginx Reverse Proxy (Port 5173)
+# Volumes:
+#   - ecomind-database-volume — Persists SQLite historical & cache databases
+# =============================================================================
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ecomind-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: ./backend/.env
+        required: false
+      - path: ./.env
+        required: false
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HISTORICAL_DB_PATH=/app/database/historical_telemetry.db
+      - CACHE_DB_PATH=/app/database/semantic_cache.db
+      - CACHE_INDEX_PATH=/app/database/semantic_cache.index
+    volumes:
+      - ecomind-database-volume:/app/database
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - ecomind-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    container_name: ecomind-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - ecomind-network
+
+volumes:
+  ecomind-database-volume:
+    name: ecomind-database-volume
+
+networks:
+  ecomind-network:
+    name: ecomind-network
+    driver: bridge
+

@@ -1,0 +1,33 @@
+# Python virtual environments & packages
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local environment and secret files
+.env
+.env.local
+.env.*
+!.env.example
+
+# Local SQLite databases and indexes (persisted via Docker volumes)
+database/*.db
+database/*.db-journal
+database/*.index
+database/*.lock
+
+# Version control & IDE artifacts
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# Test caches & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+tests/__pycache__/
+

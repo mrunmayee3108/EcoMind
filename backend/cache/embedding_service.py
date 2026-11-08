@@ -30,7 +30,10 @@ class EmbeddingService:
             try:
                 from sentence_transformers import SentenceTransformer
                 logger.info(f"Loading sentence-transformer embedding model: {self.model_name}")
-                self._model = SentenceTransformer(self.model_name)
+                try:
+                    self._model = SentenceTransformer(self.model_name, local_files_only=True)
+                except Exception:
+                    self._model = SentenceTransformer(self.model_name)
                 if hasattr(self._model, "get_embedding_dimension"):
                     self._dimension = self._model.get_embedding_dimension()
                 else:

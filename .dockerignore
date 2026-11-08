@@ -1,0 +1,49 @@
+# Python virtual environments & build artifacts
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+venv/
+.venv/
+backend/venv/
+backend/.venv/
+
+# Node.js dependencies & builds
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+build/
+.npm/
+
+# Environment files and secrets
+.env
+.env.local
+.env.*
+!.env.example
+backend/.env
+backend/.env.local
+backend/.env.*
+!backend/.env.example
+
+# SQLite databases & persistent volume data
+database/*.db
+database/*.db-journal
+database/*.index
+database/*.lock
+backend/database/*.db
+backend/database/*.db-journal
+backend/database/*.index
+backend/database/*.lock
+
+# Version control & IDE files
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# Test caches and reports
+.pytest_cache/
+.coverage
+htmlcov/
+
