@@ -69,7 +69,7 @@ User Query
 | **Multi-Objective Optimizer** | Phase 6 | **Completed & Verified** | [`optimizer.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/router/optimizer.py), [`routing_policy.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/router/routing_policy.py), [`routes_chat.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/routes_chat.py), Pareto filtering, dynamic weight renormalization, 173 tests |
 | **Eco Receipt Generation** | Phase 7 | **Completed & Verified** | [`receipt/schemas.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/schemas.py), [`receipt_generator.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/receipt/receipt_generator.py), itemized resource invoices, explainability, 191 tests |
 | **Sustainability Dashboard** | Phase 8 | **Completed & Verified** | [`database/historical_store.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/database/historical_store.py), [`routes_dashboard.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/routes_dashboard.py), [`schemas_dashboard.py`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/backend/api/schemas_dashboard.py), React 19 dashboard with 4 analytics views & receipt modal, 201 tests |
-| **Benchmarking & Paper** | Phase 9–11 | Planned | Evaluation suite, ablation studies, and academic manuscript |
+| **Local Launcher & Modern UI/UX** | Post-Phase 8 | **Completed & Verified** | [`run_ecomind.bat`](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/run_ecomind.bat), light SaaS theme, conversational AI assistant, prompt suggestions, response insights, and ML.ENERGY cloud estimation |
 
 ---
 

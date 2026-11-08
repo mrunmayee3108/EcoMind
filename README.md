@@ -672,14 +672,14 @@ EcoReceipt ([backend/receipt/schemas.py](backend/receipt/schemas.py))
 3. **Mobile Client Ingestion**: The backend does not directly query mobile device sensors; mobile client telemetry requires client-side transmission.
 4. **Historical Database Storage**: Telemetry and Eco Receipts are now durably archived in SQLite (`database/historical_telemetry.db`), resolving the 1,000-record ring-buffer eviction limitation for completed requests and receipts. The in-memory buffer (`deque(maxlen=1000)`) is retained as an ephemeral fast cache.
 
-### Subsequent Roadmap
+### Implementation Roadmap & Milestone Completion
 
-* **Phase 5A**: Hardware-agnostic telemetry layer & NVIDIA GPU sampling (Complete & Verified — 117 tests passing).
-* **Phase 5B**: Environmental accounting methodology, versioned source registry & pluggable cloud estimation (Complete & Verified — 156 tests passing).
-* **Phase 6**: Multi-objective Pareto routing optimizer (Complete & Verified — 173 tests passing).
-* **Phase 7**: Comprehensive user-facing Eco Receipts (Complete & Verified — 191 tests passing).
-* **Phase 8**: Sustainability Dashboard & Historical Aggregations (Complete & Verified — 201 tests passing).
-* **Phase 9**: Research Benchmark — 500-query evaluation suite (EcoMind-Router-500) (Upcoming).
-* **Phase 10**: Empirical Evaluation — Baselines (Always-Large, Always-Small, No-Cache) and ablation studies (Upcoming).
-* **Phase 11**: Research Paper — Academic manuscript documenting findings (Upcoming).
+* **Phase 5A**: Hardware-agnostic telemetry layer & NVIDIA GPU sampling via NVML (Complete & Verified — 117 tests passing).
+* **Phase 5B**: Environmental accounting methodology, versioned source registry, grid manager & pluggable cloud estimation (Complete & Verified — 156 tests passing).
+* **Phase 6**: Multi-objective Pareto routing optimizer balancing quality, latency, cost, and energy with dynamic weight renormalization (Complete & Verified — 173 tests passing).
+* **Phase 7**: Comprehensive user-facing Eco Receipts with itemized cost, energy, carbon, water disclosures, and explainability (Complete & Verified — 191 tests passing).
+* **Phase 8**: Sustainability Dashboard & Historical Aggregations backed by SQLite persistence (`historical_telemetry.db`) and 6 analytics REST endpoints (Complete & Verified — 201 tests passing).
+* **Unified Local Launcher (`run_ecomind.bat`)**: Automated single-command Windows batch runner that validates prerequisites (`python`, `node`, `npm`), checks port conflicts on `8000` & `5173`, activates the virtual environment, and launches the backend and frontend in dedicated live terminal windows.
+* **Production UI/UX Redesign & Modern SaaS Interface**: Complete light-theme design overhaul featuring a welcoming conversational AI Assistant, prompt suggestion chips, keyboard execution (`Enter` submits, `Shift+Enter` newline), prominent answer card with copy feedback, compact **Response Insights**, and a 4-tab Sustainability Dashboard (**Overview**, **Environmental Impact**, **How EcoMind Works**, **Activity History**) with invoice-style Eco Receipt modal inspection.
+* **Evidence-Grounded Cloud Energy Estimation**: Configured and activated pluggable empirical estimation (`MLEnergyEstimator` v3.0 / `EcoLogits`) via `ENABLE_CLOUD_ENERGY_ESTIMATION=true` in `backend/.env`, calculating cloud inference energy in Joules with transparent `ESTIMATED` labeling, methodology citations, and $\pm 20\%$ uncertainty bounds without fabricating unmetered water or remote data center carbon.
 
