@@ -1,7 +1,6 @@
 # EcoMind — System Architecture Reference
 
 > **Comprehensive Architectural Specifications, Data Flow, and Request Traces**  
-> *Repository State: Phase 8 (Sustainability Dashboard & Historical Analytics)*
 
 ---
 
