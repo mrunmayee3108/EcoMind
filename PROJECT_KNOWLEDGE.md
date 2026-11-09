@@ -1,21 +1,17 @@
 # EcoMind — Project Knowledge
 
-> **Concise Engineering Reference & System Knowledge**  
-> *Target Audience: Project Owner & AI Coding Assistants*  
-> *Current Status: Phase 8 Completed & Verified (Sustainability Dashboard & Historical Analytics, SQLite Persistence, 201 Tests Passing)*  
-> *Detailed System Diagrams & Execution Traces: see [ARCHITECTURE.md](file:///c:/Users/Mrunmayee%20Potdar/Desktop/projects/EcoMind/ARCHITECTURE.md)*
+> **Concise Reference & System Knowledge**  
+> *Detailed System Diagrams & Execution Traces: see [ARCHITECTURE.md]*
 
----
 
 ## 1. Project Identity
 
 - **Project**: EcoMind — Sustainable AI Inference Control Plane
-- **One-Liner**: An intelligent control plane that routes user queries to the lowest-resource execution path (tool, cache, small model, medium model, or cloud model) that satisfies required quality and latency constraints.
+- An intelligent control plane that routes user queries to the lowest-resource execution path (tool, cache, small model, medium model, or cloud model) that satisfies required quality and latency constraints.
 - **The Core Problem**: Current AI systems send every query to massive cloud LLMs regardless of complexity, causing extreme computational over-provisioning and wasting electricity, water cooling, and carbon emissions.
 - **The Core Idea**: Treat LLMs as an expensive fallback, not the default engine. If a deterministic tool or a smaller model can answer accurately, use it.
 - **Important Positioning**: EcoMind is **NOT just a chatbot**. The research contribution is the **unified, explainable controller** that balances quality, latency, cost, and environmental impact.
 
----
 
 ## 2. The Core Idea in Simple Words
 
@@ -27,7 +23,6 @@ Similarly, for **"convert 100 km to miles"**:
 - **Conventional AI**: Consumes LLM inference cycles and tokens to perform arithmetic multiplication.
 - **EcoMind Approach**: Uses deterministic `UnitConverter` to solve with mathematical precision in $< 0.1 \text{ ms}$ with **0 tokens**.
 
----
 
 ## 3. Development Status
 
@@ -49,7 +44,6 @@ Similarly, for **"convert 100 km to miles"**:
 | **Docker & Compose** | Containerized Reproducibility | Completed | **Yes** | Production Dockerfiles (`python:3.10-slim` non-root user & `node:20`/`nginx:alpine`), `docker-compose.yml`, named persistent SQLite volume `ecomind-database-volume` |
 | **GitHub Actions CI** | Automated Continuous Integration | Completed | **Yes** | 3-job CI pipeline (`backend-ci` 201 tests, `frontend-ci` TypeScript & Vite build, `docker-verification` multi-stage build tests) on push and PR to `main` |
 
----
 
 ## 4. Current File Structure & Roles
 
@@ -131,7 +125,6 @@ frontend/
 run_ecomind.bat                 # Unified single-command launcher for Windows (FastAPI + Vite)
 ```
 
----
 
 ## 5. Phase Summaries (0, 1, 2, 3, 4, and 5A)
 
@@ -194,7 +187,6 @@ run_ecomind.bat                 # Unified single-command launcher for Windows (F
    - Exposes `GET /telemetry/capabilities` (`gpu_energy`, `system_energy`, `device_energy`, `provider_energy`).
    - Graceful degradation: uses best real measurement source available, returns `null` + `UNAVAILABLE` otherwise, never substitutes fake estimates.
 
----
 
 ## 6. What EcoMind Can and Cannot Do Right Now
 
@@ -257,38 +249,6 @@ run_ecomind.bat                 # Unified single-command launcher for Windows (F
 6. **Execution Pipeline Integration**:
    - Integrated into `/chat`, `/router/config`, and `/router/optimize`. Emits granular `RoutingDecision` telemetry attached to response metadata and `TelemetryRecord`.
 
----
-
-## 6. What EcoMind Can and Cannot Do Right Now
-
-### What It CAN Do Now
-- Instantly evaluate arithmetic expressions via AST in $< 1 \text{ ms}$ with **0 tokens** and **0 LLM calls**.
-- Instantly convert length, mass, and temperature units deterministically with **0 tokens** and **0 LLM calls**.
-- Instantly compute date differences, offsets, weekdays, and leap-year queries in $< 0.1 \text{ ms}$ with **0 tokens** and **0 LLM calls**.
-- Instantly calculate descriptive statistics (mean, median, min, max, standard deviation) over numeric lists with **0 tokens** and **0 LLM calls**.
-- Instantly compute word count, character count, sentence count, and frequency distributions over text with **0 tokens** and **0 LLM calls**.
-- Prioritize deterministic tools before cache lookup or model routing.
-- Conservatively reuse previous model answers via two-stage Semantic Cache for equivalent queries with **0 tokens** and **0 model calls**.
-- Reject false cache hits when queries add constraints, temporal modifiers, different entities, or require deeper reasoning.
-- Prevent caching of dynamic or time-sensitive queries to eliminate stale answer risks.
-- Classify queries into 7 task categories via `QueryAnalyzer` and route to deterministic tools or logical model tiers (`small`, `medium`, `large`) via `RoutingPolicy`.
-- Dynamically resolve logical tiers to configured providers (`GroqProvider`, `GeminiProvider`, `LocalProvider` / Ollama) via `ModelDispatcher`.
-- Extract and display authentic token counts, measured latency, and cache telemetry in the React frontend.
-- Measure live physical GPU energy on NVIDIA hardware via NVML during local inference windows with explicit limitation labeling.
-- Decouple telemetry collection from vendor-specific code via generic `MeasurementProvider` abstraction.
-- Enforce explicit measurement scopes (`GPU_INFERENCE_WINDOW`, `DEVICE`, `SYSTEM`, `CLOUD_INFERENCE`, `UNKNOWN`) so energy measurements are never ambiguously conflated.
-- Introspect physical measurement capabilities via `GET /telemetry/capabilities`.
-- Ingest client device telemetry via `AndroidEnergyProvider` and `AppleEnergyProvider` interfaces without pretending the backend accesses remote phones directly.
-- Support manual execution path directives (`auto`, `deterministic_tool`, `semantic_cache`, `small_model`, `medium_model`, `large_model`).
-- Introspect registered tools (`GET /tools`), model profiles (`GET /models`), cache statistics (`GET /cache/stats`), and telemetry (`GET /telemetry/summary`, `GET /telemetry/recent`, `GET /telemetry/capabilities`).
-- Audit versioned environmental accounting sources, citations, and freshness statuses via `GET /telemetry/sources` and `GET /telemetry/sources/{id}`.
-- Trigger automatic freshness audits via `POST /telemetry/sources/refresh`.
-- Estimate cloud energy via pluggable estimators (`MLEnergyEstimator` empirical v3.0, `EcoLogitsEstimator` LCA model) when `ENABLE_CLOUD_ENERGY_ESTIMATION=True`.
-- Dynamically manage grid carbon intensity across regional grids (Ember Climate 2024 fallbacks for US, US-CA, IN, DE, FR, UK, EU, GLOBAL) via `GET /telemetry/grid`.
-- Safeguard water metrics across 4 discrete scopes (direct evaporative, indirect power, supply chain, total lifecycle) and preserve anti-fabrication standards.
-- Compute pair-wise savings comparisons via `POST /telemetry/savings/compare`, enforcing the Non-Zero Rule, comparison types, and quality degradation penalties.
-- Run automated multi-objective Pareto optimization across quality ($Q$), latency ($L$), cost ($\$$), and environmental impact ($E$) with dynamic weight renormalization via `POST /router/optimize` and `/chat`.
-- Introspect router configurations, weights, and thresholds via `GET /router/config`.
 
 ### Phase 7: Eco Receipt Generation (Completed & Live Integrated)
 1. **Machine-Readable Itemized Invoice**:
@@ -303,7 +263,6 @@ run_ecomind.bat                 # Unified single-command launcher for Windows (F
    - Comprehensive disclosures of scope boundaries (GPU energy is not system energy) and non-optimality disclaimers.
    - Respects failed requests honestly without inventing completion metrics.
 
----
 
 ## 6. What EcoMind Can and Cannot Do Right Now
 
@@ -343,7 +302,6 @@ run_ecomind.bat                 # Unified single-command launcher for Windows (F
 - Run the full-stack system reproducibly in any environment using Docker and Docker Compose (`docker-compose up --build`) with automatic reverse-proxying, non-root backend execution, and persistent SQLite storage.
 - Automatically validate all 201 backend tests, strict TypeScript types, frontend builds, and Docker container builds on every push and pull request via GitHub Actions CI (`.github/workflows/ci.yml`).
 
----
 
 ## 7. Current System State & Production Readiness
 
